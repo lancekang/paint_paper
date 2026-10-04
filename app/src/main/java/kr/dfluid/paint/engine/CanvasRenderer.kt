@@ -1104,6 +1104,72 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return out
     }
 
+    /**
+     * 보이는 그림 전체를 새 레이어 한 장으로 ([flatten]이면 다른 레이어를 모두 지우고 그 한 장만 남김).
+     * 실행취소 한 단계 (지운 레이어는 StructureCommand가 보관).
+     */
+    fun mergeVisible(flatten: Boolean) = post {
+        finishOp()
+        val d = doc ?: return@post
+        // 어니언 스킨은 빼고 합성 (재생 중처럼)
+        val keepPlaying = animPlaying
+        animPlaying = true
+        belowValid = false
+        markAllDirty()
+        val tiles = try {
+            ensureComposite(d)
+            splitToTiles(d, compResult!!.readAll())
+        } catch (e: OutOfMemoryError) {
+            reportError("메모리가 부족해 합치지 못했습니다.")
+            return@post
+        } finally {
+            animPlaying = keepPlaying
+            belowValid = false
+            markAllDirty()
+        }
+        structural { doc ->
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(if (flatten) "통합" else "병합 복사"))
+            if (flatten) {
+                doc.root.children.clear()
+                insert(doc.root, 0, n)
+            } else {
+                // 맨 위(루트의 끝)에 넣어야 그 위에 덮이는 레이어가 없음
+                insert(doc.root, doc.root.children.size, n)
+            }
+            n.id
+        }
+        val s = surfaces[d.activeId] ?: return@post
+        if (s.tileCount == 0) tiles.forEach { (k, b) -> s.write(k, b) }
+        thumbQueue.add(d.activeId)
+        belowValid = false
+        markAllDirty()
+    }
+
+    /** 캔버스 크기 RGBA(위→아래 행)를 비어 있지 않은 타일로 */
+    private fun splitToTiles(d: Document, px: ByteBuffer): Map<Int, ByteBuffer> {
+        val out = HashMap<Int, ByteBuffer>()
+        val cols = TileMath.cols(d.width)
+        val rows = TileMath.rows(d.height)
+        val row = ByteArray(TILE * 4)
+        for (ty in 0 until rows) for (tx in 0 until cols) {
+            val buf = GlUtil.byteBuffer(TILE_BYTES)
+            val x0 = tx * TILE
+            val w = min(TILE, d.width - x0)
+            for (yy in 0 until TILE) {
+                val y = ty * TILE + yy
+                if (y >= d.height) break
+                px.position((y * d.width + x0) * 4)
+                px.get(row, 0, w * 4)
+                buf.position(yy * TILE * 4)
+                buf.put(row, 0, w * 4)
+            }
+            px.rewind()
+            buf.rewind()
+            if (!TileMath.isEmpty(buf)) out[ty * cols + tx] = buf
+        }
+        return out
+    }
+
     /** 텍스트 레이어 [id]의 내용을 [spec]으로 바꿉니다 (픽셀 + 속성을 한 번의 실행취소로). */
     fun updateText(id: Int, spec: TextSpec) = post {
         finishOp()
