@@ -539,6 +539,7 @@ uniform sampler2D u_tex;
 uniform sampler2D u_sel;
 uniform int u_hasSel;
 uniform float u_time;
+uniform int u_gray;
 out vec4 o;
 
 bool inside(vec2 uv) {
@@ -551,6 +552,8 @@ void main() {
     float k = mod(q.x + q.y, 2.0);
     vec3 chk = mix(vec3(1.0), vec3(0.85), k);
     vec3 col = c.rgb + chk * (1.0 - c.a);
+    // 흑백 보기: 명암만 (화면 표시만 바꿈, 그림은 그대로)
+    if (u_gray == 1) col = vec3(dot(col, vec3(0.299, 0.587, 0.114)));
     if (u_hasSel == 1) {
         vec2 dx = dFdx(v_uv);
         vec2 dy = dFdy(v_uv);

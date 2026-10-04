@@ -176,6 +176,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     @Volatile private var animPlaying = false
     /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
     private var borderBufs: Array<RenderTarget>? = null
+    /** 흑백 보기 (화면 표시만) */
+    @Volatile var grayView = false
+        set(v) { field = v; requestRender() }
+
     // ---- 내비게이터 ----
     /** UI가 켜 두면 그림이 바뀔 때 축소판을 보냄 */
     @Volatile var navigatorOn = false
@@ -3419,7 +3423,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val showSel = hasSelection && op !is Op.Transform
         selTex?.setFilter(GLES20.GL_NEAREST, GLES20.GL_NEAREST)
         val time = (SystemClock.uptimeMillis() % 100_000L) / 1000f
-        compositor.drawDisplay(comp.tex, v, d.width, d.height, screenW, screenH, if (showSel) selTex!!.tex else 0, time)
+        compositor.drawDisplay(comp.tex, v, d.width, d.height, screenW, screenH, if (showSel) selTex!!.tex else 0, time, grayView)
         // 다음 합성에서 레벨 0만 쓰도록 되돌림
         comp.setFilter(GLES20.GL_NEAREST, GLES20.GL_NEAREST)
 

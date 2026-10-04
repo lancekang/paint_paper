@@ -287,7 +287,7 @@ class Compositor {
     }
 
     /** view = [m00, m10, m01, m11, tx, ty, scale] (Viewport.toGl) */
-    fun drawDisplay(tex: Int, view: FloatArray, canvasW: Int, canvasH: Int, screenW: Int, screenH: Int, selTex: Int, time: Float) {
+    fun drawDisplay(tex: Int, view: FloatArray, canvasW: Int, canvasH: Int, screenW: Int, screenH: Int, selTex: Int, time: Float, gray: Boolean = false) {
         viewMatrix[0] = view[0]; viewMatrix[1] = view[1]; viewMatrix[2] = 0f
         viewMatrix[3] = view[2]; viewMatrix[4] = view[3]; viewMatrix[5] = 0f
         viewMatrix[6] = view[4]; viewMatrix[7] = view[5]; viewMatrix[8] = 1f
@@ -298,6 +298,7 @@ class Compositor {
         GLES20.glUniform1i(display.u("u_sel"), 1)
         GLES20.glUniform1i(display.u("u_hasSel"), if (selTex != 0) 1 else 0)
         GLES20.glUniform1f(display.u("u_time"), time)
+        GLES20.glUniform1i(display.u("u_gray"), if (gray) 1 else 0)
         GLES20.glUniformMatrix3fv(display.u("u_view"), 1, false, viewMatrix, 0)
         GLES20.glUniform2f(display.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
         GLES20.glUniform2f(display.u("u_screen"), screenW.toFloat(), screenH.toFloat())

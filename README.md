@@ -75,6 +75,7 @@ Kotlin + OpenGL ES 3.0으로 만든 드로잉 앱입니다. 외부 라이브러�
 | 이동 / 회전 / 확대 (누른 채 드래그) | Space / R / Z |
 | 확대 / 축소 / 맞춤 / 100% | Ctrl+= / Ctrl+− / Ctrl+0 / Ctrl+1 |
 | 15° 회전 / 회전 초기화 / 좌우 반전 | 4, 6 / 5 / Shift+H |
+| 흑백 보기 (명암 확인) | Ctrl+Shift+G |
 | UI 숨기기 | Tab |
 | 새 캔버스 / 열기 / 저장 / 다른 이름 / PNG | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+Shift+E |
 

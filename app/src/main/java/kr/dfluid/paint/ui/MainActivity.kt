@@ -124,6 +124,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var selBar: LinearLayout
     // ---- 내비게이터 ----
     private lateinit var colorSliders: ColorSliders
+    private lateinit var grayBtn: ImageView
     private lateinit var navPanel: LinearLayout
     private lateinit var navView: NavigatorView
     private lateinit var navBtn: ImageView
@@ -462,6 +463,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         act(R.drawable.ic_view_fit, "화면에 맞춤", Action.VIEW_FIT)
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
         act(R.drawable.ic_view_flip, "화면 좌우 반전", Action.VIEW_FLIP)
+        grayBtn = act(R.drawable.ic_view_gray, "흑백 보기 (명암 확인, 그림은 그대로)", Action.VIEW_GRAY)
+        Ui.setOn(grayBtn, renderer.grayView)
         subBtn = barBtn(R.drawable.ic_subview, "서브 뷰 (참고 이미지 창)") { toggleSubView() }
         navBtn = barBtn(R.drawable.ic_navigator, "내비게이터 (전체 그림, 눌러서 이동)") { toggleNavigator() }
         group("그리기 보조")
@@ -1823,6 +1826,11 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.VIEW_ROTATE_RIGHT -> { v.rotateCentered(ROTATE_STEP); canvasView.pushView(); showHud("${v.rotationDegrees}°") }
             Action.VIEW_ROTATE_RESET -> { v.resetRotation(); canvasView.pushView() }
             Action.VIEW_FLIP -> { v.toggleFlip(); canvasView.pushView(); showHud(if (v.flipped) "좌우 반전" else "반전 해제") }
+            Action.VIEW_GRAY -> {
+                renderer.grayView = !renderer.grayView
+                if (::grayBtn.isInitialized) Ui.setOn(grayBtn, renderer.grayView)
+                showHud(if (renderer.grayView) "흑백 보기 (명암 확인)" else "흑백 보기 끔")
+            }
             Action.TOGGLE_UI -> toggleUi()
             Action.FILE_NEW -> confirmIfDirty { Dialogs.newCanvas(this, maxTex, settings) { w, h, bg -> newCanvas(w, h, bg) } }
             Action.FILE_OPEN -> confirmIfDirty { openDocument() }
