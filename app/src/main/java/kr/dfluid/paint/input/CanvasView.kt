@@ -39,6 +39,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val drawWithFinger: Boolean
         val symmetry: Symmetry
         val straightLine: Boolean
+        /** 후보정 강도 (캔버스 px, 0 = 끔) */
+        val postSmoothing: Float
+        /** true면 캔버스 입력을 받지 않음 (문서를 불러오는 중) */
+        val inputBlocked: Boolean
         /** 도형 도구: 종류(0 직선, 1 사각형, 2 타원, 3 올가미 채우기)와 채우기(0 선, 1 채우기, 2 둘 다) */
         val shapeKind: Int
         val shapeFill: Int
@@ -130,7 +134,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         rulerC = if (free) null else h.ruler.constraintFor(s[0], s[1], last[0] - s[0], last[1] - s[1])
         rulerPending = false
         builder.begin(brush, h.smoothing, s[0], s[1], s[2], s[3], s[4])
-        taper.begin(brush.taperIn, brush.taperOut)
+        // 자에 붙은 선은 후보정하면 휘므로 끔
+        taper.begin(brush.taperIn, brush.taperOut, if (rulerC == null) h.postSmoothing / viewport.scale else 0f)
         for (k in 1 until pendingPts.size) {
             val q = pendingPts[k]
             feedPoint(q[0], q[1], q[2], q[3], q[4], h)
@@ -222,6 +227,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val h = host ?: return false
         renderer.hideCursor()
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && h.inputBlocked) {
+            mode = Mode.IGNORE
+            return true
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 tapStart = e.eventTime
@@ -404,7 +413,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     rulerPending = false
                     rulerC = null
                     builder.begin(brush, h.smoothing, tmp[0], tmp[1], p, tl, an)
-                    taper.begin(brush.taperIn, brush.taperOut)
+                    taper.begin(brush.taperIn, brush.taperOut, h.postSmoothing / viewport.scale)
                     builder.drain()?.let { emitStamps(taper.push(it), h) }
                 }
                 h.onStrokeStarted()

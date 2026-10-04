@@ -24,12 +24,15 @@ class StrokeTaper {
     private var raw = FloatArray(f * 256)
     private var dist = FloatArray(256)
     private var n = 0
+    /** 후보정: 펜을 뗄 때 획 전체를 이 거리(캔버스 px, σ)로 매끄럽게 (0 = 끔) */
+    private var post = 0f
 
-    val enabled: Boolean get() = inLen > 0f || outLen > 0f
+    val enabled: Boolean get() = inLen > 0f || outLen > 0f || post > 0f
 
-    fun begin(taperIn: Float, taperOut: Float) {
+    fun begin(taperIn: Float, taperOut: Float, postSmooth: Float = 0f) {
         inLen = max(0f, taperIn)
         outLen = max(0f, taperOut)
+        post = max(0f, postSmooth)
         n = 0
     }
 
@@ -50,8 +53,44 @@ class StrokeTaper {
 
     /** 펜을 뗄 때: 출이 있으면 획 전체(입·출 모두 적용)를 돌려줍니다. 없으면 null (다시 그릴 필요 없음). */
     fun finish(): FloatArray? {
-        if (outLen <= 0f || n == 0) return null
+        if ((outLen <= 0f && post <= 0f) || n == 0) return null
+        if (post > 0f) smoothRaw()
         return render(0, n, total = dist[n - 1])
+    }
+
+    /**
+     * 후보정: 시작점부터 거리 기준 가우시안으로 위치를 고릅니다. 양 끝은 고정
+     * (끝에 가까울수록 σ를 끝까지 거리로 줄임). 반지름·각도는 그대로.
+     */
+    private fun smoothRaw() {
+        if (n < 3) return
+        val total = dist[n - 1]
+        val xs = FloatArray(n)
+        val ys = FloatArray(n)
+        var lo = 0
+        for (i in 0 until n) {
+            val sigma = min(post, min(dist[i], total - dist[i]))
+            if (sigma < 0.5f) {
+                xs[i] = raw[i * f]; ys[i] = raw[i * f + 1]
+                continue
+            }
+            val reach = sigma * 3f
+            while (lo < n && dist[lo] < dist[i] - reach) lo++
+            var sx = 0f; var sy = 0f; var sw = 0f
+            var k = lo
+            val inv = -0.5f / (sigma * sigma)
+            while (k < n && dist[k] <= dist[i] + reach) {
+                val dd = dist[k] - dist[i]
+                val w = kotlin.math.exp(dd * dd * inv)
+                sx += raw[k * f] * w; sy += raw[k * f + 1] * w; sw += w
+                k++
+            }
+            xs[i] = sx / sw; ys[i] = sy / sw
+        }
+        for (i in 0 until n) {
+            raw[i * f] = xs[i]; raw[i * f + 1] = ys[i]
+            if (i > 0) dist[i] = dist[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
+        }
     }
 
     /** 기록 전체를 입·출 모두 적용해 돌려줍니다 (직선 자처럼 매번 통째로 다시 그릴 때). */

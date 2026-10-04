@@ -84,6 +84,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var quickMaskBtn: ImageView
     private var straightLineOn = false
     override val straightLine: Boolean get() = straightLineOn
+    override val postSmoothing: Float get() = settings.postSmoothing
     override val shapeKind: Int get() = settings.shapeKind
     override val shapeFill: Int get() = settings.shapeFill
     private lateinit var lineBtn: ImageView
@@ -2063,9 +2064,21 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
     }
 
+    /** 자동 저장본을 여는 중: 이때 그린 획은 복원된 문서에 덮여 사라지므로 캔버스 입력을 막습니다. */
+    private var restoring = false
+    private val restoreTimeout = Runnable { restoring = false }
+    override val inputBlocked: Boolean
+        get() {
+            if (restoring) showHud("그림을 불러오는 중입니다…")
+            return restoring
+        }
+
     private fun restoreAutosave() {
         val f = autosaveFile
         if (!f.exists()) return
+        restoring = true
+        // 렌더러가 메모리 부족 등으로 열지 못해도 영영 막히지 않게
+        ui.postDelayed(restoreTimeout, 20_000)
         io.execute {
             try {
                 // 최대 텍스처 크기를 아직 모르면 넉넉히 두고, 렌더러가 실패 시 오류를 알립니다.
@@ -2078,10 +2091,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                         if (currentUri != null && clean) savedVersion = version
                         autosavedVersion = version
                         updateTitle()
+                        restoring = false
+                        ui.removeCallbacks(restoreTimeout)
                     }
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "autosave restore failed", e)
+                ui.post { restoring = false }
             }
         }
     }

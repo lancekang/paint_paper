@@ -178,20 +178,29 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         op.onChange = { p -> lib.active(tool)?.let { it.opacity = (p / 100f).coerceAtLeast(0.01f); refresh() } }
         hard.onChange = { p -> lib.active(tool)?.let { it.hardness = p / 100f; refresh() } }
         smooth.onChange = { p -> host.settings.smoothing = p / 100f * 0.95f; refresh() }
+        val post = Ui.SliderRow(ctx, "후보정", 40)
+        val pv = host.settings.postSmoothing.toInt()
+        post.set(pv, if (pv == 0) "끔" else "$pv")
+        post.onChange = { p ->
+            host.settings.postSmoothing = p.toFloat()
+            post.value.text = if (p == 0) "끔" else "$p"
+        }
+        post.onStop = { host.settings.save() }
         listOf(size, op, hard).forEach { r -> r.onStop = { lib.save() } }
         for (r in listOf(size, op)) view.addView(r.view, lp())
         // 세부 설정은 접어 둡니다.
         val details = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (detailsOpen) View.VISIBLE else View.GONE
-            for (r in listOf(hard, smooth, tIn, tOut)) addView(r.view, lp())
+            for (r in listOf(hard, smooth, post, tIn, tOut)) addView(r.view, lp())
+            addView(hint("후보정: 펜을 떼면 획 전체를 매끄럽게 다시 그립니다 (화면 기준, 확대해서 그리면 덜 바뀜)."), lp())
         }
         val toggle = Ui.text(ctx, "", 12f, Ui.SUBTEXT).apply {
             val p = Ui.dp(ctx, 4f)
             setPadding(0, p, 0, p)
             isClickable = true
         }
-        fun label() { toggle.text = if (detailsOpen) "세부 설정 ▴" else "세부 설정 (경도, 손떨림 보정, 입·출) ▾" }
+        fun label() { toggle.text = if (detailsOpen) "세부 설정 ▴" else "세부 설정 (경도, 손떨림 보정, 후보정, 입·출) ▾" }
         label()
         toggle.setOnClickListener {
             detailsOpen = !detailsOpen

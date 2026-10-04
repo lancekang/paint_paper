@@ -14,6 +14,8 @@ class AppSettings(context: Context) {
     /** 필압 감마. 1 = 선형, < 1 = 가볍게, > 1 = 무겁게 */
     var pressureGamma = 1f
     var smoothing = 0.3f
+    /** 후보정 (화면 px 기준 σ, 0 = 끔) */
+    var postSmoothing = 0f
     var drawWithFinger = false
     var primaryColor = Color.BLACK
     var secondaryColor = Color.WHITE
@@ -96,6 +98,7 @@ class AppSettings(context: Context) {
     init {
         pressureGamma = prefs.getFloat("pressureGamma", 1f)
         smoothing = prefs.getFloat("smoothing", 0.3f)
+        postSmoothing = prefs.getFloat("postSmoothing", 0f)
         drawWithFinger = prefs.getBoolean("drawWithFinger", false)
         primaryColor = prefs.getInt("primaryColor", Color.BLACK)
         secondaryColor = prefs.getInt("secondaryColor", Color.WHITE)
@@ -168,6 +171,7 @@ class AppSettings(context: Context) {
         prefs.edit()
             .putFloat("pressureGamma", pressureGamma)
             .putFloat("smoothing", smoothing)
+            .putFloat("postSmoothing", postSmoothing)
             .putBoolean("drawWithFinger", drawWithFinger)
             .putInt("primaryColor", primaryColor)
             .putInt("secondaryColor", secondaryColor)
