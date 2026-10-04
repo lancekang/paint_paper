@@ -157,8 +157,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private val playTick = object : Runnable {
         override fun run() {
             if (!animPlaying || animCount <= 0) return
+            val next = (animFrame + 1).mod(animCount)
             renderer.setFrame(animFrame + 1, playing = true)
-            ui.postDelayed(this, (1000f / settings.animFps).toLong())
+            ui.postDelayed(this, (1000f / settings.animFps * holdOf(next)).toLong())
         }
     }
     private lateinit var hud: TextView
@@ -1891,8 +1892,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             frameStrip.removeAllViews()
             for (i in 0 until count) {
                 val b = Ui.button(this, "${i + 1}") { stopPlayback(); renderer.setFrame(i) }
-                frameStrip.addView(b, LinearLayout.LayoutParams(Ui.dp(this, 40f), Ui.dp(this, 34f)).apply { rightMargin = Ui.dp(this@MainActivity, 3f) })
+                b.minimumWidth = Ui.dp(this, 40f)
+                b.setOnLongClickListener { chooseHold(i); true }
+                Ui.setTip(b, "${i + 1}번 프레임 (길게 누르면 셀 길이)")
+                frameStrip.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 34f)).apply { rightMargin = Ui.dp(this@MainActivity, 3f) })
             }
+        }
+        // 길이가 2 이상인 셀은 "번호×길이"
+        for (i in 0 until frameStrip.childCount) {
+            (frameStrip.getChildAt(i) as? TextView)?.text = if (holdOf(i) > 1) "${i + 1}×${holdOf(i)}" else "${i + 1}"
         }
         for (i in 0 until frameStrip.childCount) Ui.setOn(frameStrip.getChildAt(i), i == frame)
     }
@@ -1945,8 +1953,23 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             animPlaying = true
             playBtn.setImageResource(R.drawable.ic_pause)
             Ui.tint(playBtn)
-            ui.postDelayed(playTick, (1000f / settings.animFps).toLong())
+            ui.postDelayed(playTick, (1000f / settings.animFps * holdOf(animFrame)).toLong())
         }
+    }
+
+    /** [i]번 셀의 길이 (프레임 수) */
+    private fun holdOf(i: Int): Int = renderer.animHolds.getOrNull(i)?.coerceAtLeast(1) ?: 1
+
+    /** 프레임 칸을 길게 눌러 셀 길이 고르기 */
+    private fun chooseHold(i: Int) {
+        val opts = (1..8).toList()
+        Ui.dialog(this)
+            .setTitle("${i + 1}번 셀 길이 (지금 ${holdOf(i)}프레임)")
+            .setItems(opts.map { if (it == 1) "1프레임 (기본)" else "${it}프레임" }.toTypedArray()) { _, k ->
+                renderer.setFrameHold(i, opts[k])
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun stopPlayback() {
@@ -2607,7 +2630,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                         if (small !== full) small.recycle()
                         full.recycle()
                         val enc = encoder ?: kr.dfluid.paint.document.GifEncoder(out, gw, gh, delay).also { encoder = it }
-                        enc.addFrame(px)
+                        enc.addFrame(px, (delay * holdOf(i)).coerceAtMost(65535))
                         if (i + 1 < count) {
                             ui.post { showHud("GIF로 내보내는 중… ${i + 1} / $count") }
                             step(i + 1)
@@ -2791,7 +2814,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                         frame.getPixels(px, 0, vw, 0, 0, vw, vh)
                         frame.recycle()
                         val enc = encoder ?: kr.dfluid.paint.document.Mp4Encoder(pfd.fileDescriptor, vw, vh, fps).also { encoder = it }
-                        enc.addFrame(px)
+                        // 셀 길이만큼 같은 장을 반복
+                        repeat(holdOf(i)) { enc.addFrame(px) }
                         if (i + 1 < count) {
                             ui.post { showHud("MP4로 내보내는 중… ${i + 1} / $count") }
                             step(i + 1)

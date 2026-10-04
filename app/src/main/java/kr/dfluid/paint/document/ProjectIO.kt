@@ -70,6 +70,7 @@ object ProjectIO {
                 if (n.props.paperStrength > 0f) o.put("paperStrength", n.props.paperStrength.toDouble()).put("paperScale", n.props.paperScale.toDouble()).put("paperKind", n.props.paperKind)
                 if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
+                if (n.props.hold > 1) o.put("hold", n.props.hold)
                 n.props.adjustKind?.let { k ->
                     o.put("adjustKind", k).put("adjustValues", JSONArray().apply { n.props.adjustValues.forEach { put(it.toDouble()) } })
                 }
@@ -238,6 +239,7 @@ object ProjectIO {
         wcWidth = o.optDouble("wcWidth", 0.0).toFloat().coerceIn(0f, 40f),
         wcStrength = o.optDouble("wcStrength", 0.6).toFloat().coerceIn(0f, 1f),
         adjustKind = o.optString("adjustKind", "").takeIf { k -> k.isNotEmpty() && kr.dfluid.paint.engine.FilterKind.entries.any { it.name == k } },
+        hold = o.optInt("hold", 1).coerceIn(1, 99),
         adjustValues = o.optJSONArray("adjustValues")?.let { a -> List(a.length()) { a.optDouble(it, 0.0).toFloat() } } ?: emptyList(),
     )
 

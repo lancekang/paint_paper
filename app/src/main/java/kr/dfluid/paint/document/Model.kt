@@ -76,6 +76,8 @@ data class LayerProps(
      */
     val adjustKind: String? = null,
     val adjustValues: List<Float> = emptyList(),
+    /** 애니메이션 셀 길이 (프레임 수, 재생·내보내기에서 이만큼 보여 줌) */
+    val hold: Int = 1,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

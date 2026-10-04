@@ -25,12 +25,12 @@ class GifEncoder(private val out: OutputStream, private val w: Int, private val 
     }
 
     /** [argb] = w*h 픽셀 (알파 포함, 프리멀티플라이드 아님). 알파 < 128은 투명. */
-    fun addFrame(argb: IntArray) {
+    fun addFrame(argb: IntArray, delay: Int = delayCs) {
         val palette = Quantizer.palette(argb, 255)
         val indices = Quantizer.map(argb, palette)
         // 그래픽 제어 확장: 이전 프레임을 지우고(2) 그림, 투명색 0
         out.write(byteArrayOf(0x21, 0xF9.toByte(), 4, ((2 shl 2) or 1).toByte()))
-        short(delayCs)
+        short(delay)
         out.write(0); out.write(0)
         // 이미지 서술자 + 지역 팔레트 256색
         out.write(0x2C)

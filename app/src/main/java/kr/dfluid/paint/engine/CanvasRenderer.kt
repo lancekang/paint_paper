@@ -1010,6 +1010,24 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         callback(d.width, d.height, buf)
     }
 
+    /** 애니메이션 셀마다 길이 (UI가 재생·내보내기에 씀, notifyLayers가 갱신) */
+    @Volatile var animHolds: IntArray = IntArray(0)
+        private set
+
+    /** [frame]번 셀의 길이를 [hold] 프레임으로 (실행취소 가능) */
+    fun setFrameHold(frame: Int, hold: Int) = post {
+        val d = doc ?: return@post
+        val cell = animFolder(d)?.children?.getOrNull(frame) ?: return@post
+        val h = hold.coerceIn(1, 99)
+        if (cell.props.hold == h) return@post
+        val before = d.shape()
+        cell.props = cell.props.copy(hold = h)
+        history.nextLabel = "셀 길이"
+        history.push(StructureCommand(before, d.shape(), d.activeId, d.activeId))
+        notifyHistory()
+        notifyLayers()
+    }
+
     fun setOnionSkin(on: Boolean) = post {
         onionSkin = on
         markAllDirty()
@@ -4523,6 +4541,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val af = animFolder(d)
         val count = af?.children?.size ?: 0
         if (af != null && count > 0) animFrame = animFrame.coerceIn(0, count - 1)
+        animHolds = af?.children?.map { it.props.hold.coerceAtLeast(1) }?.toIntArray() ?: IntArray(0)
         val frame = animFrame
         main.post { listener.onAnimation(af != null, frame, count) }
     }
