@@ -29,6 +29,7 @@ import kr.dfluid.paint.brush.Brush
 import kr.dfluid.paint.brush.BrushLibrary
 import kr.dfluid.paint.brush.TipImage
 import kr.dfluid.paint.brush.Tool
+import kr.dfluid.paint.document.CanvasEdit
 import kr.dfluid.paint.document.DocumentData
 import kr.dfluid.paint.document.NodeInfo
 import kr.dfluid.paint.document.ProjectIO
@@ -407,6 +408,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("편집")
         undoBtn = barBtn(R.drawable.ic_undo, "실행취소", Action.UNDO) { renderer.undo() }
         redoBtn = barBtn(R.drawable.ic_redo, "다시실행", Action.REDO) { renderer.redo() }
+        barBtn(R.drawable.ic_canvas, "캔버스 (이미지 크기 · 캔버스 크기 · 회전 · 반전)") { chooseCanvasEdit() }
         barBtn(R.drawable.ic_adjust, "필터 · 색조 보정 (색조/채도/명도, 밝기/대비, 흐리기 등)") { chooseFilter() }
         group("선택")
         act(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM)
@@ -1110,6 +1112,42 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // =====================================================================
     // 필터 · 색조 보정
     // =====================================================================
+
+    // =====================================================================
+    // 캔버스 편집
+    // =====================================================================
+
+    private fun chooseCanvasEdit() {
+        if (transforming) commitTransform()
+        val v = canvasView.viewport
+        val w = v.canvasW.toInt()
+        val h = v.canvasH.toInt()
+        val items = arrayOf(
+            "이미지 크기 변경…", "캔버스 크기 변경…",
+            "시계 방향 90° 회전", "반시계 방향 90° 회전", "180° 회전",
+            "좌우 반전", "상하 반전",
+        )
+        Ui.dialog(this)
+            .setTitle("캔버스 · ${w}×$h px")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> Dialogs.imageSize(this, w, h, maxTex) { nw, nh -> runCanvasEdit(CanvasEdit.Resample(nw, nh)) }
+                    1 -> Dialogs.canvasSize(this, w, h, maxTex) { nw, nh, ax, ay -> runCanvasEdit(CanvasEdit.Resize(nw, nh, ax, ay)) }
+                    2 -> runCanvasEdit(CanvasEdit.Rotate(1))
+                    3 -> runCanvasEdit(CanvasEdit.Rotate(3))
+                    4 -> runCanvasEdit(CanvasEdit.Rotate(2))
+                    5 -> runCanvasEdit(CanvasEdit.Flip(true))
+                    6 -> runCanvasEdit(CanvasEdit.Flip(false))
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun runCanvasEdit(e: CanvasEdit) {
+        showHud("${e.label}…")
+        renderer.editCanvas(e)
+    }
 
     private fun chooseFilter() {
         if (transforming) commitTransform()

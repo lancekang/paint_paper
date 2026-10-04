@@ -18,6 +18,12 @@ interface LayerStore {
 
     /** RLE로 압축된 선택 마스크 (SelectionMask.encode). null = 선택 없음 */
     fun setSelectionMask(encoded: ByteArray?)
+
+    /** 문서 전체 스냅샷 (캔버스 크기·회전처럼 모든 픽셀이 바뀌는 편집의 실행취소용) */
+    fun captureAll(): DocumentData
+
+    /** 문서 전체를 [data]로 바꿉니다. 실행취소 기록은 그대로 두고 선택 영역은 해제합니다. */
+    fun replaceAll(data: DocumentData)
 }
 
 interface HistoryCommand {
@@ -125,5 +131,25 @@ class CompoundCommand(private val parts: List<HistoryCommand>) : HistoryCommand 
 
     override fun redo(s: LayerStore) {
         for (p in parts) p.redo(s)
+    }
+}
+
+/**
+ * 문서 전체 교체 (캔버스 크기 변경·회전·반전). 보관본은 한 벌만:
+ * 실행취소/다시실행 때마다 지금 문서를 잡아 두고 보관본으로 바꿉니다.
+ */
+class DocumentCommand(private var other: DocumentData) : HistoryCommand {
+    override val bytes: Long
+        get() = other.nodes.sumOf { n ->
+            (n.tiles?.values?.sumOf { it.capacity().toLong() } ?: 0L) + (n.maskTiles?.values?.sumOf { it.capacity().toLong() } ?: 0L)
+        }
+
+    override fun undo(s: LayerStore) = swap(s)
+    override fun redo(s: LayerStore) = swap(s)
+
+    private fun swap(s: LayerStore) {
+        val cur = s.captureAll()
+        s.replaceAll(other)
+        other = cur
     }
 }

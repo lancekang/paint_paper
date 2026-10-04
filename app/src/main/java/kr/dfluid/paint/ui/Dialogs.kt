@@ -297,4 +297,139 @@ object Dialogs {
             .setNegativeButton("취소", null)
             .show()
     }
+
+    /** 숫자 입력 칸 두 개(가로·세로) 한 줄. */
+    private fun sizeFields(ctx: Context, w0: Int, h0: Int): Triple<LinearLayout, EditText, EditText> {
+        fun field(v: Int) = EditText(ctx).apply {
+            setText(v.toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+            maxLines = 1
+            setTextColor(Ui.TEXT)
+            setSelectAllOnFocus(true)
+        }
+        val w = field(w0)
+        val h = field(h0)
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "가로", 14f), Ui.wrap())
+            addView(w, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Ui.text(ctx, "  세로", 14f), Ui.wrap())
+            addView(h, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Ui.text(ctx, " px", 14f), Ui.wrap())
+        }
+        return Triple(row, w, h)
+    }
+
+    /** 고친 쪽이 아닌 칸을 비율에 맞춰 따라 바꿉니다 (keep()가 true일 때). */
+    private fun linkRatio(w: EditText, h: EditText, ratio: Float, keep: () -> Boolean) {
+        var syncing = false
+        fun watch(src: EditText, dst: EditText, f: Float) = src.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(e: Editable?) {
+                if (syncing || !keep() || !src.hasFocus()) return
+                val v = e?.toString()?.toIntOrNull() ?: return
+                syncing = true
+                dst.setText(maxOf(1, (v * f).roundToInt()).toString())
+                syncing = false
+            }
+        })
+        watch(w, h, 1f / ratio)
+        watch(h, w, ratio)
+    }
+
+    /** 이미지 크기 변경 (그림을 늘이거나 줄임). */
+    fun imageSize(ctx: Context, curW: Int, curH: Int, maxSize: Int, onOk: (Int, Int) -> Unit) {
+        val pad = Ui.dp(ctx, 20f)
+        val (row, w, h) = sizeFields(ctx, curW, curH)
+        val keep = Switch(ctx).apply {
+            text = "가로세로 비율 유지"
+            isChecked = true
+            setTextColor(Ui.TEXT)
+        }
+        linkRatio(w, h, curW.toFloat() / curH) { keep.isChecked }
+        val percents = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf(25, 50, 200).forEach { pct ->
+            percents.addView(Ui.button(ctx, "$pct%") {
+                w.setText(maxOf(1, curW * pct / 100).toString())
+                h.setText(maxOf(1, curH * pct / 100).toString())
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = Ui.dp(ctx, 6f)
+            })
+        }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            addView(Ui.text(ctx, "지금 ${curW}×$curH px", 12f, Ui.SUBTEXT))
+            addView(row)
+            addView(keep)
+            addView(percents, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = Ui.dp(ctx, 6f)
+            })
+            addView(Ui.text(ctx, "모든 레이어를 새 크기로 늘이거나 줄입니다. 실행취소할 수 있습니다.", 12f, Ui.SUBTEXT).apply {
+                setPadding(0, Ui.dp(ctx, 8f), 0, 0)
+            })
+        }
+        Ui.dialog(ctx)
+            .setTitle("이미지 크기 변경")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ ->
+                val ww = w.text.toString().toIntOrNull() ?: 0
+                val hh = h.text.toString().toIntOrNull() ?: 0
+                if (ww in 1..maxSize && hh in 1..maxSize) onOk(ww, hh)
+                else Toast.makeText(ctx, "1~$maxSize px 사이로 입력하세요.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    /** 캔버스 크기 변경 (그림은 그대로, 기준 위치를 정해 둘레를 넓히거나 자름). */
+    fun canvasSize(ctx: Context, curW: Int, curH: Int, maxSize: Int, onOk: (Int, Int, Float, Float) -> Unit) {
+        val pad = Ui.dp(ctx, 20f)
+        val (row, w, h) = sizeFields(ctx, curW, curH)
+        var ax = 0.5f
+        var ay = 0.5f
+        val anchors = ArrayList<Pair<View, Pair<Float, Float>>>()
+        fun refresh() = anchors.forEach { (v, a) -> Ui.setOn(v, a.first == ax && a.second == ay) }
+        val grid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        for (yy in 0..2) {
+            val r = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            for (xx in 0..2) {
+                val a = xx / 2f to yy / 2f
+                val b = Ui.button(ctx, "●") {
+                    ax = a.first; ay = a.second
+                    refresh()
+                }
+                anchors.add(b to a)
+                r.addView(b, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 36f)).apply {
+                    rightMargin = Ui.dp(ctx, 3f); bottomMargin = Ui.dp(ctx, 3f)
+                })
+            }
+            grid.addView(r)
+        }
+        refresh()
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            addView(Ui.text(ctx, "지금 ${curW}×$curH px", 12f, Ui.SUBTEXT))
+            addView(row)
+            addView(Ui.text(ctx, "기준 위치", 13f).apply { setPadding(0, Ui.dp(ctx, 8f), 0, Ui.dp(ctx, 4f)) })
+            addView(grid)
+            addView(Ui.text(ctx, "그림 크기는 그대로 두고 기준 위치를 중심으로 둘레를 넓히거나 자릅니다. 넓힌 곳은 투명합니다.", 12f, Ui.SUBTEXT).apply {
+                setPadding(0, Ui.dp(ctx, 8f), 0, 0)
+            })
+        }
+        Ui.dialog(ctx)
+            .setTitle("캔버스 크기 변경")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ ->
+                val ww = w.text.toString().toIntOrNull() ?: 0
+                val hh = h.text.toString().toIntOrNull() ?: 0
+                if (ww in 1..maxSize && hh in 1..maxSize) onOk(ww, hh, ax, ay)
+                else Toast.makeText(ctx, "1~$maxSize px 사이로 입력하세요.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
 }

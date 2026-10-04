@@ -12,8 +12,10 @@ import android.util.Log
 import kr.dfluid.paint.brush.Brush
 import kr.dfluid.paint.brush.StrokeBuilder
 import kr.dfluid.paint.document.BlendMode
+import kr.dfluid.paint.document.CanvasEdit
 import kr.dfluid.paint.document.CompoundCommand
 import kr.dfluid.paint.document.Document
+import kr.dfluid.paint.document.DocumentCommand
 import kr.dfluid.paint.document.DocumentData
 import kr.dfluid.paint.document.History
 import kr.dfluid.paint.document.HistoryCommand
@@ -498,6 +500,66 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun commitFilter() = post { if (op is Op.Filter) finishOp() }
 
     fun cancelFilter() = post { (op as? Op.Filter)?.let { endFilter(it) } }
+
+    // =====================================================================
+    // UI 스레드 API — 캔버스 편집 (크기·회전·반전)
+    // =====================================================================
+
+    /**
+     * 모든 레이어·마스크에 [e]를 적용합니다. 픽셀 계산은 백그라운드, 반영은 GL 스레드.
+     * 실행취소 한 단계 (문서 전체 보관). 선택 영역은 해제됩니다.
+     */
+    fun editCanvas(e: CanvasEdit) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val (nw, nh) = e.newSize(d.width, d.height)
+        if (nw < 1 || nh < 1 || nw > maxTextureSize || nh > maxTextureSize) {
+            reportError("캔버스는 1~${maxTextureSize}px이어야 합니다.")
+            return@post
+        }
+        if (e is CanvasEdit.Resize && nw == d.width && nh == d.height) return@post
+        if (e is CanvasEdit.Resample && nw == d.width && nh == d.height) return@post
+        val before = try {
+            captureData(d)
+        } catch (t: OutOfMemoryError) {
+            reportError("메모리가 부족해 캔버스를 바꾸지 못했습니다.")
+            return@post
+        }
+        val v = version
+        worker.execute {
+            val after = try {
+                CanvasEdit.apply(before, e)
+            } catch (t: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 캔버스를 바꾸지 못했습니다.") }
+                null
+            } ?: return@execute
+            post { applyCanvasEdit(d, v, before, after) }
+        }
+    }
+
+    private fun applyCanvasEdit(docRef: Document, v: Long, before: DocumentData, after: DocumentData) {
+        if (doc !== docRef) return
+        if (op != null) {
+            // 진행 중인 획이 끝난 뒤에 (끝나며 그림이 바뀌면 아래 버전 검사에서 취소)
+            main.postDelayed({ post { applyCanvasEdit(docRef, v, before, after) } }, 60)
+            return
+        }
+        if (version != v) {
+            reportError("계산하는 동안 그림이 바뀌어 캔버스 편집을 취소했습니다. 다시 해 주세요.")
+            return
+        }
+        try {
+            buildDocument(after, keepHistory = true, refit = true)
+        } catch (t: Throwable) {
+            Log.e(TAG, "canvas edit failed", t)
+            reportError("메모리가 부족해 캔버스를 바꾸지 못했습니다. 기존 그림은 그대로 둡니다.")
+            return
+        }
+        clearSelectionState()
+        history.push(DocumentCommand(before))
+        version++
+        notifyHistory()
+    }
 
     // =====================================================================
     // UI 스레드 API — 선택 영역
@@ -2366,6 +2428,13 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         selTex!!.uploadAll(buf)
         selEncoded = encoded
         setHasSelection(true)
+    }
+
+    override fun captureAll(): DocumentData = captureData(doc!!)
+
+    override fun replaceAll(data: DocumentData) {
+        buildDocument(data, keepHistory = true, refit = true)
+        clearSelectionState()
     }
 
     private fun afterEdit() {
