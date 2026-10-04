@@ -531,7 +531,39 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             onColorChanged = { c -> livePrimary(c) }
             onColorCommitted = { c -> setPrimary(c) }
         }
+        // 탭: 서클 / 사각형 / 중간색 / 컬러 세트
+        val mixView = MixGridView(ctx, settings.mixCorners) { settings.primaryColor }.apply {
+            onPick = { c -> setPrimary(c) }
+            onCornersChanged = { settings.save(); showHud("중간색 모서리를 주색으로 바꿨습니다") }
+        }
+        val setView = SwatchGridView(ctx, settings.palette) { settings.primaryColor }.apply {
+            onPick = { c -> setPrimary(c) }
+            onChanged = { settings.save() }
+        }
+        val colorTabs = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabButtons = ArrayList<TextView>()
+        fun showColorTab(t: Int) {
+            settings.colorTab = t
+            colorPicker.wheel = t == 0
+            colorPicker.visibility = if (t <= 1) View.VISIBLE else View.GONE
+            mixView.visibility = if (t == 2) View.VISIBLE else View.GONE
+            setView.visibility = if (t == 3) View.VISIBLE else View.GONE
+            tabButtons.forEachIndexed { i, b -> Ui.setOn(b, i == t) }
+        }
+        listOf("서클", "사각형", "중간색", "세트").forEachIndexed { i, label ->
+            val b = Ui.button(ctx, label) { showColorTab(i); settings.save() }
+            tabButtons.add(b)
+            colorTabs.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 3f) })
+        }
+        tips.bind(tabButtons[2], "중간색: 칸을 누르면 그 색, 네 모서리를 길게 누르면 주색으로 바꿈")
+        tips.bind(tabButtons[3], "컬러 세트: + = 주색 추가, 누르면 고르기, 길게 누르면 삭제")
+        colorCard.body.addView(colorTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = Ui.dp(ctx, 6f)
+        })
         colorCard.body.addView(colorPicker, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        colorCard.body.addView(mixView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        colorCard.body.addView(setView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        showColorTab(settings.colorTab)
         colorCard.body.addView(toolOptions.recentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = Ui.dp(ctx, 8f)
         })

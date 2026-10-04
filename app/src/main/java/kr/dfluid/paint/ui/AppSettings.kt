@@ -48,6 +48,17 @@ class AppSettings(context: Context) {
     var canvasTransparent = false
     var canvasBackground = Color.WHITE
     val recentColors = ArrayList<Int>()
+    /** 색 카드 탭: 0 서클, 1 사각형, 2 중간색, 3 컬러 세트 */
+    var colorTab = 0
+    /** 중간색 네 모서리 (왼쪽 위, 오른쪽 위, 왼쪽 아래, 오른쪽 아래) */
+    val mixCorners = intArrayOf(0xFFFFFFFF.toInt(), 0xFFE53935.toInt(), 0xFF1E88E5.toInt(), 0xFF000000.toInt())
+    /** 컬러 세트 */
+    val palette = arrayListOf(
+        0xFF000000.toInt(), 0xFF404040.toInt(), 0xFF808080.toInt(), 0xFFC0C0C0.toInt(), 0xFFFFFFFF.toInt(),
+        0xFFFFE0D0.toInt(), 0xFFF5C6A5.toInt(), 0xFFD9967A.toInt(), 0xFF8D5524.toInt(),
+        0xFFE53935.toInt(), 0xFFFB8C00.toInt(), 0xFFFDD835.toInt(), 0xFF43A047.toInt(),
+        0xFF00ACC1.toInt(), 0xFF1E88E5.toInt(), 0xFF3949AB.toInt(), 0xFF8E24AA.toInt(), 0xFFD81B60.toInt(),
+    )
     /** 화면 테마: THEME_SYSTEM / THEME_LIGHT / THEME_DARK */
     var themeMode = THEME_SYSTEM
     /** 오른쪽 패널 카드 펼침 */
@@ -117,6 +128,12 @@ class AppSettings(context: Context) {
         toolBarCollapsed = prefs.getBoolean("toolBarCollapsed", false)
         rightPanelCollapsed = prefs.getBoolean("rightPanelCollapsed", false)
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
+        colorTab = prefs.getInt("colorTab", 0).coerceIn(0, 3)
+        prefs.getString("mixCorners", null)?.split(",")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 4 }?.forEachIndexed { i, c -> mixCorners[i] = c }
+        prefs.getString("palette", null)?.let { p ->
+            palette.clear()
+            p.split(",").mapNotNull { it.toIntOrNull() }.let { palette.addAll(it) }
+        }
     }
 
     val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillRef)
@@ -162,6 +179,9 @@ class AppSettings(context: Context) {
             .putBoolean("canvasTransparent", canvasTransparent)
             .putInt("canvasBackground", canvasBackground)
             .putString("recentColors", recentColors.joinToString(","))
+            .putInt("colorTab", colorTab)
+            .putString("mixCorners", mixCorners.joinToString(","))
+            .putString("palette", palette.joinToString(","))
             .putInt("themeMode", themeMode)
             .putBoolean("cardToolOpen", cardToolOpen)
             .putBoolean("cardColorOpen", cardColorOpen)
