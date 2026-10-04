@@ -21,6 +21,8 @@ class FloatingPanels(
     private val root: FrameLayout,
     /** 끄는 중 스냅된 안내선 (화면 x, 화면 y). null = 없음 */
     private val guides: (Float?, Float?) -> Unit,
+    /** 패널 위치나 크기가 바뀐 뒤 (다른 패널을 맞출 때) */
+    private val onChanged: () -> Unit = {},
 ) {
     private val ctx = root.context
     private val margin = Ui.dp(ctx, 8f).toFloat()
@@ -83,6 +85,7 @@ class FloatingPanels(
                     item.fx = fraction(view.x, view.width.toFloat(), root.width.toFloat())
                     if (moveY) item.fy = fraction(view.y, view.height.toFloat(), root.height.toFloat())
                     item.save(item.fx, item.fy)
+                    onChanged()
                 }
             }
             true
@@ -97,6 +100,7 @@ class FloatingPanels(
         if (w <= 0f || it.view.width == 0) return
         it.view.x = margin + it.fx * max(0f, w - it.view.width - 2 * margin)
         if (it.moveY) it.view.y = margin + it.fy * max(0f, h - it.view.height - 2 * margin)
+        onChanged()
     }
 
     private fun fraction(pos: Float, size: Float, total: Float): Float {

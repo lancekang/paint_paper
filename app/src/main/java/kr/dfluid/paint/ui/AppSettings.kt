@@ -49,6 +49,10 @@ class AppSettings(context: Context) {
     var toolBarFx = 0f
     var toolBarFy = 0.5f
     var rightPanelFx = 1f
+    /** 패널 접힘 (손잡이와 펼치기 버튼만 남김) */
+    var topBarCollapsed = false
+    var toolBarCollapsed = false
+    var rightPanelCollapsed = false
     /** 패널 위치 잠금 (손잡이 숨김) */
     var panelLock = false
 
@@ -89,6 +93,9 @@ class AppSettings(context: Context) {
         toolBarFy = prefs.getFloat("toolBarFy", 0.5f)
         rightPanelFx = prefs.getFloat("rightPanelFx", 1f)
         panelLock = prefs.getBoolean("panelLock", false)
+        topBarCollapsed = prefs.getBoolean("topBarCollapsed", false)
+        toolBarCollapsed = prefs.getBoolean("toolBarCollapsed", false)
+        rightPanelCollapsed = prefs.getBoolean("rightPanelCollapsed", false)
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
     }
 
@@ -139,6 +146,9 @@ class AppSettings(context: Context) {
             .putFloat("toolBarFy", toolBarFy)
             .putFloat("rightPanelFx", rightPanelFx)
             .putBoolean("panelLock", panelLock)
+            .putBoolean("topBarCollapsed", topBarCollapsed)
+            .putBoolean("toolBarCollapsed", toolBarCollapsed)
+            .putBoolean("rightPanelCollapsed", rightPanelCollapsed)
             .apply()
     }
 

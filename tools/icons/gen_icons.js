@@ -133,6 +133,8 @@ const icons = {
   mask: [rect(3, 3, 18, 18, 2), { d: circle(12, 12, 5), fill: true, alpha: 0.9 }],
   chevron_right: ['M9,6l6,6l-6,6'],
   chevron_down: ['M6,9l6,6l6,-6'],
+  chevron_left: ['M15,6l-6,6l6,6'],
+  chevron_up: ['M6,15l6,-6l6,6'],
 
   // ---- 변형 바 ----
   flip_h: ['M3,7l5,5l-5,5V7', 'M21,7l-5,5l5,5V7', 'M12,20v2M12,14v2M12,8v2M12,2v2'],

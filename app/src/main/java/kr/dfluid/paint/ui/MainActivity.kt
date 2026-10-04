@@ -123,6 +123,12 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var tips: Ui.Tips
     private lateinit var rootView: FrameLayout
     private var panels: FloatingPanels? = null
+    // 패널 접기: 접으면 숨길 뷰들과 접기/펼치기 버튼
+    private val topBarBody = ArrayList<View>()
+    private val toolBarBody = ArrayList<View>()
+    private lateinit var topToggle: ImageView
+    private lateinit var toolToggle: ImageView
+    private lateinit var panelToggle: ImageView
     private lateinit var toolCard: Ui.Card
     private lateinit var colorCard: Ui.Card
     private lateinit var layerCard: Ui.Card
@@ -295,7 +301,6 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
      * GLSurfaceView를 떼었다 붙이면 GL 컨텍스트를 잃으므로 절대 떼지 않습니다.
      */
     private fun rebuildUi() {
-        val panelOn = rightPanel.visibility == View.VISIBLE
         val perfOn = perfPanel.visibility == View.VISIBLE
         val bench = benchText.text
         Ui.applyTheme(resolveDark())
@@ -305,8 +310,6 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             if (v !== canvasView && v !== overlay) rootView.removeViewAt(i)
         }
         buildChrome()
-        rightPanel.visibility = if (panelOn) View.VISIBLE else View.GONE
-        Ui.setOn(panelBtn, panelOn)
         perfPanel.visibility = if (perfOn) View.VISIBLE else View.GONE
         Ui.setOn(perfBtn, perfOn)
         benchText.text = bench
@@ -355,6 +358,16 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             gravity = Gravity.CENTER_VERTICAL
             rightMargin = Ui.dp(ctx, 2f)
         })
+        topToggle = Ui.iconButton(ctx, R.drawable.ic_chevron_left, "상단 바 접기/펼치기", 32f, ghost = true) {
+            settings.topBarCollapsed = !settings.topBarCollapsed
+            settings.save()
+            applyCollapse()
+        }
+        bar.addView(topToggle, LinearLayout.LayoutParams(Ui.dp(ctx, 32f), Ui.dp(ctx, 40f)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            rightMargin = Ui.dp(ctx, 4f)
+        })
+        val topBodyStart = bar.childCount
         bar.addView(titleLabel)
         var group = LinearLayout(ctx)
         fun group(label: String): TextView {
@@ -404,11 +417,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
         barBtn(R.drawable.ic_keyboard, "단축키 설정") { openShortcutSettings() }
         barBtn(R.drawable.ic_settings, "설정 (테마·필압 등)") { showSettings() }
-        panelBtn = barBtn(R.drawable.ic_panel, "오른쪽 패널 보이기/숨기기") {
-            rightPanel.visibility = if (rightPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            Ui.setOn(panelBtn, rightPanel.visibility == View.VISIBLE)
+        panelBtn = barBtn(R.drawable.ic_panel, "오른쪽 패널 접기/펼치기") {
+            settings.rightPanelCollapsed = !settings.rightPanelCollapsed
+            settings.save()
+            applyCollapse()
         }
-        Ui.setOn(panelBtn, true)
+        topBarBody.clear()
+        for (i in topBodyStart until bar.childCount) topBarBody.add(bar.getChildAt(i))
         Ui.setEnabled(undoBtn, false)
         Ui.setEnabled(redoBtn, false)
         updateSymmetryButton()
@@ -429,6 +444,14 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
         val toolGrip = FloatingPanels.Grip(ctx, horizontal = true)
         tools.addView(toolGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 16f)))
+        toolToggle = Ui.iconButton(ctx, R.drawable.ic_chevron_up, "도구 막대 접기/펼치기 (접으면 지금 도구만 표시)", 28f, ghost = true) {
+            settings.toolBarCollapsed = !settings.toolBarCollapsed
+            settings.save()
+            applyCollapse()
+        }
+        toolToggle.setPadding(Ui.dp(ctx, 8f), Ui.dp(ctx, 2f), Ui.dp(ctx, 8f), Ui.dp(ctx, 2f))
+        tools.addView(toolToggle, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 26f)).apply { bottomMargin = Ui.dp(ctx, 2f) })
+        val toolBodyStart = tools.childCount
         val groups = listOf(
             listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER),
             listOf(Tool.SELECT, Tool.MOVE),
@@ -455,6 +478,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         swatches.addView(secondarySwatch, FrameLayout.LayoutParams(swatchSize, swatchSize, Gravity.BOTTOM or Gravity.END))
         swatches.addView(primarySwatch, FrameLayout.LayoutParams(swatchSize, swatchSize, Gravity.TOP or Gravity.START))
         tools.addView(swatches, LinearLayout.LayoutParams(swatchSize + Ui.dp(ctx, 12f), swatchSize + Ui.dp(ctx, 12f)))
+        toolBarBody.clear()
+        for (i in toolBodyStart until tools.childCount) toolBarBody.add(tools.getChildAt(i))
         toolBar = ScrollView(ctx).apply {
             isVerticalScrollBarEnabled = false
             addView(tools)
@@ -464,10 +489,20 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
         // ---- 오른쪽 패널: 카드 3장 (도구 속성 / 색 / 레이어) ----
         val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        val panelGrip = FloatingPanels.Grip(ctx, horizontal = true).apply {
+        val panelGrip = FloatingPanels.Grip(ctx, horizontal = true)
+        panelToggle = Ui.iconButton(ctx, R.drawable.ic_chevron_up, "오른쪽 패널 접기/펼치기", 24f, ghost = true) {
+            settings.rightPanelCollapsed = !settings.rightPanelCollapsed
+            settings.save()
+            applyCollapse()
+        }.apply { val p = Ui.dp(ctx, 3f); setPadding(p, p, p, p) }
+        panel.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(Ui.dp(ctx, 6f), 0, Ui.dp(ctx, 2f), 0)
             background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
-        }
-        panel.addView(panelGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 56f), Ui.dp(ctx, 18f)).apply {
+            addView(panelGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 22f)))
+            addView(panelToggle, Ui.square(ctx, 24f))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             bottomMargin = Ui.dp(ctx, 4f)
         })
@@ -506,7 +541,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
         // ---- 패널 끌어 옮기기 + 스냅 ----
         panels?.detach()
-        val fp = FloatingPanels(root) { x, y -> overlay.showLayoutGuides(x, y) }
+        val fp = FloatingPanels(root, guides = { x, y -> overlay.showLayoutGuides(x, y) }, onChanged = { fitRightPanel() })
         panels = fp
         fp.add(topBar, topGrip, moveY = true, settings.topBarFx, settings.topBarFy) { fx, fy ->
             settings.topBarFx = fx; settings.topBarFy = fy; settings.save()
@@ -518,6 +553,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             settings.rightPanelFx = fx; settings.save()
         }
         if (settings.panelLock) listOf(topGrip, toolGrip, panelGrip).forEach { it.visibility = View.GONE }
+        applyCollapse()
 
         // ---- 변형 확정/취소 바 ----
         val tb = LinearLayout(ctx).apply {
@@ -586,6 +622,55 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         root.addView(hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
     }
 
+    /**
+     * 패널 접힘 상태를 화면에 반영합니다.
+     * 상단 바: 손잡이·펼치기 버튼만 / 도구 막대: 손잡이·펼치기·지금 도구만 / 오른쪽 패널: 손잡이 줄만.
+     */
+    private fun applyCollapse() {
+        val topC = settings.topBarCollapsed
+        topBarBody.forEach { it.visibility = if (topC) View.GONE else View.VISIBLE }
+        topToggle.setImageResource(if (topC) R.drawable.ic_chevron_right else R.drawable.ic_chevron_left)
+        Ui.tint(topToggle)
+
+        val toolC = settings.toolBarCollapsed
+        val current = toolButtons[tool]
+        toolBarBody.forEach { it.visibility = if (!toolC || it === current) View.VISIBLE else View.GONE }
+        toolToggle.setImageResource(if (toolC) R.drawable.ic_chevron_down else R.drawable.ic_chevron_up)
+        Ui.tint(toolToggle)
+
+        val panelC = settings.rightPanelCollapsed
+        listOf(toolCard.view, colorCard.view, layerCard.view).forEach { it.visibility = if (panelC) View.GONE else View.VISIBLE }
+        panelToggle.setImageResource(if (panelC) R.drawable.ic_chevron_down else R.drawable.ic_chevron_up)
+        Ui.tint(panelToggle)
+        Ui.setOn(panelBtn, !panelC)
+    }
+
+    /**
+     * 오른쪽 패널 세로 범위: 상단 바와 가로로 겹치면 상단 바 아래(바가 위쪽일 때) 또는 위(아래쪽일 때)까지만.
+     * 겹치지 않으면 화면 위아래 끝까지.
+     */
+    private fun fitRightPanel() {
+        if (!::rightPanel.isInitialized || !::topBar.isInitialized) return
+        val lp = rightPanel.layoutParams as? FrameLayout.LayoutParams ?: return
+        val m = Ui.dp(this, 8f)
+        val gap = Ui.dp(this, 6f)
+        val h = rootView.height
+        var top = m
+        var bottom = m
+        if (h > 0 && topBar.visibility == View.VISIBLE && topBar.width > 0) {
+            val overlapX = topBar.x < rightPanel.x + rightPanel.width && rightPanel.x < topBar.x + topBar.width
+            if (overlapX) {
+                if (topBar.y + topBar.height / 2f < h / 2f) top = (topBar.y + topBar.height).toInt() + gap
+                else bottom = (h - topBar.y).toInt() + gap
+            }
+        }
+        if (lp.topMargin != top || lp.bottomMargin != bottom) {
+            lp.topMargin = top
+            lp.bottomMargin = bottom
+            rightPanel.layoutParams = lp
+        }
+    }
+
     /** 카드 접힘에 따라 높이를 다시 나눔: 펼친 도구·레이어 카드가 남은 공간을 나눠 가짐. */
     private fun relayoutCards() {
         val gap = Ui.dp(this, 8f)
@@ -607,6 +692,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     private fun updateToolButtons() {
         toolButtons.forEach { (t, b) -> Ui.setOn(b, t == tool) }
+        if (settings.toolBarCollapsed && toolBarBody.isNotEmpty()) applyCollapse()
     }
 
     /** 색 카드에서 드래그 중: 최근 색에는 넣지 않고 주색만 바꿈. */
