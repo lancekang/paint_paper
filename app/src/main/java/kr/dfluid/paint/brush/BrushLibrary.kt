@@ -141,6 +141,7 @@ class BrushLibrary(context: Context) {
                     val b = Brush.fromJson(arr.getJSONObject(i)) ?: continue
                     presets[b.tool]?.add(b)
                 }
+                rev = o.optInt("rev", 0)
                 val act = o.optJSONObject("active")
                 if (act != null) for (k in act.keys()) {
                     val t = Tool.entries.firstOrNull { it.name == k } ?: continue
@@ -152,7 +153,16 @@ class BrushLibrary(context: Context) {
         presets.forEach { (tool, l) ->
             if (l.isEmpty()) l.addAll(BrushPresets.defaults(tool))
         }
+        // 예전 저장본에는 유동화 보조 도구가 없으므로 한 번만 넣어 줌
+        if (rev < 1) {
+            presets[Tool.BLEND]?.let { l -> if (l.none { it.mixMode >= Brush.MIX_PUSH }) l.addAll(BrushPresets.liquifyPresets()) }
+            rev = 1
+            save()
+        }
     }
+
+    /** 저장본 판 (기본 보조 도구를 나중에 추가할 때 한 번만 넣으려고) */
+    private var rev = 0
 
     fun save() {
         val arr = JSONArray()
@@ -160,7 +170,7 @@ class BrushLibrary(context: Context) {
         val act = JSONObject()
         presets.keys.forEach { t -> active(t)?.let { act.put(t.name, it.id) } }
         val tmp = File(dir, "brushes.json.tmp")
-        tmp.writeText(JSONObject().put("brushes", arr).put("active", act).toString())
+        tmp.writeText(JSONObject().put("brushes", arr).put("active", act).put("rev", rev).toString())
         if (!tmp.renameTo(file)) {
             file.delete(); tmp.renameTo(file)
         }

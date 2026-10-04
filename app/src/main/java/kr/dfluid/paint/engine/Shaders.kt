@@ -374,6 +374,7 @@ uniform vec2 u_canvas;
 uniform sampler2D u_sel;
 uniform int u_useSel;
 uniform int u_lock;
+uniform vec2 u_center;
 out vec4 o;
 void main() {
     vec2 uv = (v_canvasPos - u_origin) / u_psize;
@@ -385,6 +386,21 @@ void main() {
     float k = a * v_alpha * u_strength;
     if (u_useSel == 1) k *= texture(u_sel, v_canvasPos / u_canvas).r;
     vec4 src;
+    vec4 outc;
+    if (u_mode >= 2) {
+        // 유동화: 섞지 않고 픽셀을 옮김 (k만큼 다른 자리에서 가져옴)
+        vec2 q;
+        if (u_mode == 2) q = v_canvasPos + u_shift * k;
+        else if (u_mode == 3) q = v_canvasPos - (v_canvasPos - u_center) * k * 0.35;
+        else q = v_canvasPos + (v_canvasPos - u_center) * k * 0.35;
+        outc = texture(u_patch, (q - u_origin) / u_psize);
+        if (u_lock == 1) {
+            vec3 c = outc.a > 0.0 ? outc.rgb / outc.a : (cur.a > 0.0 ? cur.rgb / cur.a : vec3(0.0));
+            outc = vec4(clamp(c, 0.0, 1.0) * cur.a, cur.a);
+        }
+        o = outc;
+        return;
+    }
     if (u_mode == 0) {
         src = texture(u_patch, uv + u_shift / u_psize);
     } else {
@@ -396,7 +412,7 @@ void main() {
         }
         src /= 13.0;
     }
-    vec4 outc = mix(cur, src, k);
+    outc = mix(cur, src, k);
     if (u_lock == 1) {
         vec3 c = outc.a > 0.0 ? outc.rgb / outc.a : (cur.a > 0.0 ? cur.rgb / cur.a : vec3(0.0));
         outc = vec4(clamp(c, 0.0, 1.0) * cur.a, cur.a);

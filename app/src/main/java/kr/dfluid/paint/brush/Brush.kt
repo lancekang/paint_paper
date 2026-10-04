@@ -46,7 +46,7 @@ enum class TipRotation(val label: String) {
  * @property curve 필압 곡선 제어점 [x0,y0,x1,y1,...] (0..1, x 오름차순)
  * @property taperIn 입: 시작부터 이 길이(캔버스 px) 동안 가늘게 시작 (0 = 끔)
  * @property taperOut 출: 끝에서 이 길이 동안 가늘게 끝남 (0 = 끔)
- * @property mixMode 색 혼합 도구만: MIX_SMUDGE(손끝, 지나온 색을 끌고 감) / MIX_BLUR(흐리기)
+ * @property mixMode 색 혼합 도구만: MIX_SMUDGE(손끝) / MIX_BLUR(흐리기) / 유동화 MIX_PUSH(밀기)·MIX_BLOAT(부풀리기)·MIX_PINCH(오므리기)
  */
 data class Brush(
     val id: String,
@@ -136,6 +136,10 @@ data class Brush(
         const val TAPER_MAX = 400f
         const val MIX_SMUDGE = 0
         const val MIX_BLUR = 1
+        const val MIX_PUSH = 2
+        const val MIX_BLOAT = 3
+        const val MIX_PINCH = 4
+        val MIX_LABELS = listOf("손끝", "흐리기", "밀기", "부풀리기", "오므리기")
 
         fun fromJson(o: JSONObject): Brush? {
             val tool = Tool.entries.firstOrNull { it.name == o.optString("tool") } ?: return null
@@ -169,7 +173,7 @@ data class Brush(
                 curve = curve,
                 taperIn = f("taperIn", 0f).coerceIn(0f, TAPER_MAX),
                 taperOut = f("taperOut", 0f).coerceIn(0f, TAPER_MAX),
-                mixMode = o.optInt("mixMode", base.mixMode).coerceIn(MIX_SMUDGE, MIX_BLUR),
+                mixMode = o.optInt("mixMode", base.mixMode).coerceIn(MIX_SMUDGE, MIX_PINCH),
             )
         }
     }
@@ -214,6 +218,15 @@ object BrushPresets {
         )
     }
 
+    /** 유동화 보조 도구 (색 혼합 도구 안) */
+    fun liquifyPresets(): List<Brush> = create(Tool.BLEND).let { b ->
+        listOf(
+            b.copy(id = id(), name = "유동화 밀기", size = 120f, opacity = 1f, hardness = 0.2f, spacing = 0.06f, pressureSize = 0f, pressureOpacity = 0.6f, mixMode = Brush.MIX_PUSH),
+            b.copy(id = id(), name = "부풀리기", size = 160f, opacity = 0.5f, hardness = 0f, spacing = 0.1f, pressureSize = 0f, pressureOpacity = 1f, mixMode = Brush.MIX_BLOAT),
+            b.copy(id = id(), name = "오므리기", size = 160f, opacity = 0.5f, hardness = 0f, spacing = 0.1f, pressureSize = 0f, pressureOpacity = 1f, mixMode = Brush.MIX_PINCH),
+        )
+    }
+
     /** 처음 설치했을 때 도구별로 넣어 줄 프리셋 묶음. */
     fun defaults(tool: Tool): List<Brush> = when (tool) {
         Tool.PEN -> listOf(
@@ -239,7 +252,7 @@ object BrushPresets {
             create(tool),
             create(tool).copy(id = id(), name = "색 늘이기", opacity = 1f, hardness = 0.6f, pressureOpacity = 0.4f),
             create(tool).copy(id = id(), name = "흐리기", size = 60f, opacity = 0.6f, hardness = 0f, mixMode = Brush.MIX_BLUR),
-        )
+        ) + liquifyPresets()
         Tool.ERASER -> listOf(
             create(tool),
             create(tool).copy(id = id(), name = "부드러움", hardness = 0f, size = 120f, pressureSize = 0f, pressureOpacity = 1f, flow = 0.3f, buildUp = true),

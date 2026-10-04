@@ -2548,16 +2548,22 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val rad = stamps[b + 2]
             val prev = o.prev[channel]
             o.prev[channel] = floatArrayOf(x, y)
-            // 손끝은 직전 위치가 있어야 끌고 올 색이 있습니다.
-            if (o.brush.mixMode == Brush.MIX_SMUDGE && prev == null) continue
+            val mode = o.brush.mixMode
+            val drags = mode == Brush.MIX_SMUDGE || mode == Brush.MIX_PUSH
+            // 손끝·밀기는 직전 위치가 있어야 끌고 올 색이 있습니다.
+            if (drags && prev == null) continue
             val px = prev?.get(0) ?: x
             val py = prev?.get(1) ?: y
             // 스탬프 사각형(회전 포함) 반경 + 가져올 범위
             val reach = (rad + 1f) * 1.42f + 2f
-            val extra = if (o.brush.mixMode == Brush.MIX_BLUR) rad * 0.5f + 1f else 0f
+            val extra = when (mode) {
+                Brush.MIX_BLUR -> rad * 0.5f + 1f
+                Brush.MIX_BLOAT, Brush.MIX_PINCH -> rad * 0.5f + 2f
+                else -> 0f
+            }
             val stampRect = IRect.ofBounds(x - reach, y - reach, x + reach, y + reach, d.width, d.height) ?: continue
             var src = IRect.ofBounds(x - reach - extra, y - reach - extra, x + reach + extra, y + reach + extra, d.width, d.height) ?: continue
-            if (o.brush.mixMode == Brush.MIX_SMUDGE) {
+            if (drags) {
                 IRect.ofBounds(px - reach, py - reach, px + reach, py + reach, d.width, d.height)?.let { src = src.union(it) }
             }
             val patch = ensurePatch(src.w, src.h)

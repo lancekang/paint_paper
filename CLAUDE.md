@@ -18,7 +18,7 @@
   - **입·출 처리** (`input/StrokeTaper.kt`): 원래 스탬프와 시작점부터 거리를 기록. 입은 그리는 중에 반지름 배율, 출은 펜을 뗄 때 획 전체를 다시 계산해 `CanvasRenderer.setStrokeLine`으로 스트로크 버퍼를 통째로 다시 그림. 가늘어진 구간은 스탬프 보충. 값은 `Brush.taperIn/taperOut`(캔버스 px).
   - **원근 자·동심원 자** (`input/GuideRuler.kt`): 획 시작 후 10dp 움직일 때까지 점을 모았다가(`CanvasView.feedPoint/resolveRuler`) 방향이 가장 가까운 직선/원을 고르고 이후 점을 투영. 손잡이 위에서 시작하면 Mode.RULER로 손잡이 이동. 안내선은 `OverlayView.drawRuler`. 자 상태는 AppSettings.rulerState에 저장(onPause), 캔버스 크기가 바뀌면 비율대로 옮김(fitCanvas).
   - **필터 · 색조 보정** (`engine/Filters.kt`, `Shaders.FILTER_FS/FILTER_COMBINE_FS`): Op.Filter가 필터 영역(내용 타일 경계 + 흐리기 여백, 선택이 있으면 그 경계와 교차) 크기 버퍼 3장(orig/work/result)을 잡고, 값이 바뀌면 stale만 표시해 다음 합성 때 한 번 계산(흐리기 = 가로·세로 2패스, 선형 보간 탭). 합치는 단계에서 선택 영역·투명 잠금·언샤프를 처리. 확정은 result를 타일에 블렌딩 없이 덮어쓰고 TilesCommand 한 단계. UI는 `MainActivity.showFilter`(배경을 어둡게 하지 않는 아래쪽 대화상자), 끝나면 `Listener.onFilterEnded`.
-  - **색 혼합 도구** (Tool.BLEND, `Brush.mixMode`): Op.Smudge가 활성 레이어를 smudgeBuf(캔버스 크기)에 복사해 두고, 스탬프마다 둘레를 smudgePatch로 복사 → `Shaders.SMUDGE_FS`로 작업 버퍼에 직접 섞음(손끝 = 직전 스탬프 자리 색, 흐리기 = 둘레 13탭 평균). 대칭 복제본은 `addStamps(stamps, channel)`로 채널별 직전 위치. 확정은 작업 버퍼를 타일에 덮어쓰기. 직선 자·출(setStrokeLine)은 무시, 마스크 편집 중엔 막음.
+  - **색 혼합 도구** (Tool.BLEND, `Brush.mixMode` 0 손끝 / 1 흐리기 / 2 밀기 / 3 부풀리기 / 4 오므리기 — 2~4는 유동화로 SMUDGE_FS에서 섞지 않고 좌표만 옮겨 샘플링): Op.Smudge가 활성 레이어를 smudgeBuf(캔버스 크기)에 복사해 두고, 스탬프마다 둘레를 smudgePatch로 복사 → `Shaders.SMUDGE_FS`로 작업 버퍼에 직접 섞음(손끝 = 직전 스탬프 자리 색, 흐리기 = 둘레 13탭 평균). 대칭 복제본은 `addStamps(stamps, channel)`로 채널별 직전 위치. 확정은 작업 버퍼를 타일에 덮어쓰기. 직선 자·출(setStrokeLine)은 무시, 마스크 편집 중엔 막음.
   - **선택 영역 편집** (`SelectionOps`): 확장/축소 = 챔퍼 거리 변환, 경계 흐리기 = 상자 흐림 3회. 백그라운드 계산 후 applyWand(REPLACE). 불투명한 부분 선택 = selectFromLayer.
   - **도형 도구** (Tool.SHAPE, isBrush = true라 보조 도구·크기를 씀): CanvasView Mode.SHAPE가 updateShape로 윤곽점을 만들고 `setStrokeLine(stamps, fill)`로 미리보기. 채우기 다각형은 CPU(Path → ALPHA_8)로 strokeBuf 영역에 올린 뒤 스탬프를 겹침. 종류·채우기는 AppSettings.shapeKind/shapeFill.
   - **텍스트 레이어** (`document/TextSpec.kt`, `LayerProps.text`): 픽셀은 TextSpec.render로 만든 타일. editableActive(allowText = false)가 붓질·채우기·필터를 막고, 변형은 허용(평행이동이면 위치 갱신, 아니면 래스터화). createText/updateText/rasterizeText. .dfp는 노드 JSON의 "text". 캔버스 편집 Resize는 위치를 옮기고 나머지는 래스터화.
@@ -46,6 +46,10 @@
 - adb: 다른 프로그램이 구버전(40) adb 서버를 띄워 두면 SDK의 adb(41)와 서로 서버를 죽이며 기기가 끊깁니다. 그 프로그램을 끄거나, Android Studio의 Run으로 설치하세요.
 - 결과물: `app\build\outputs\apk\debug\app-debug.apk`
 - 버전: AGP 8.5.2, Gradle 8.9(wrapper), Kotlin 2.0.21, compileSdk 34, minSdk 26, JVM 17
+
+## 셰이더 검사
+
+- 셰이더를 고쳤으면 기기에 올리기 전에 `python tools/check_shaders.py` (SDK 에뮬레이터의 glslangValidator로 Shaders.kt의 모든 GLSL ES 3.00을 컴파일). 셰이더 오류는 앱 시작 시 크래시라 기기 없이도 꼭 돌릴 것.
 
 ## 코드 규칙
 

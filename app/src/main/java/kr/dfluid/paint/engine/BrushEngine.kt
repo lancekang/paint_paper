@@ -118,6 +118,7 @@ class BrushEngine {
         GLES20.glUniform2f(p.u("u_origin"), ox.toFloat(), oy.toFloat())
         GLES20.glUniform2f(p.u("u_psize"), patch.width.toFloat(), patch.height.toFloat())
         GLES20.glUniform2f(p.u("u_shift"), shiftX, shiftY)
+        GLES20.glUniform2f(p.u("u_center"), stamps[index * StrokeBuilder.FLOATS], stamps[index * StrokeBuilder.FLOATS + 1])
         GLES20.glUniform1i(p.u("u_mode"), brush.mixMode)
         GLES20.glUniform1f(p.u("u_strength"), brush.opacity)
         GLES20.glUniform1f(p.u("u_blurR"), stamps[index * StrokeBuilder.FLOATS + 2] * 0.5f)
