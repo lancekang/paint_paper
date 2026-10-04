@@ -54,7 +54,39 @@ data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val re
 }
 
 /** 그라데이션 옵션. */
-data class GradientSpec(val radial: Boolean, val toTransparent: Boolean)
+/**
+ * [preset]: 0 주색→보조색, 1 주색→투명, 2 이상은 [GRADIENT_PRESETS]의 고정 색.
+ * [repeat]: 0 끝에서 멈춤, 1 반복, 2 거울 반복.
+ */
+data class GradientSpec(val radial: Boolean, val toTransparent: Boolean, val preset: Int = if (toTransparent) 1 else 0, val repeat: Int = 0) {
+    /** 정지점 [위치, r, g, b, a(프리멀티플라이드)] × n (최대 8) */
+    fun stops(fg: Int, bg: Int): FloatArray {
+        fun c(pos: Float, color: Int, a: Float = 1f): List<Float> {
+            val p = CanvasRenderer.premul(color, a)
+            return listOf(pos, p[0], p[1], p[2], p[3])
+        }
+        val list = when (preset) {
+            0 -> c(0f, fg) + c(1f, bg)
+            1 -> c(0f, fg) + c(1f, fg, 0f)
+            else -> {
+                val cols = GRADIENT_PRESETS.getOrNull(preset - 2)?.second ?: intArrayOf(fg, bg)
+                cols.indices.flatMap { i -> c(i / (cols.size - 1f), cols[i]) }
+            }
+        }
+        return list.toFloatArray()
+    }
+
+    companion object {
+        /** 이름과 색 (앞에서부터 고르게) */
+        val GRADIENT_PRESETS: List<Pair<String, IntArray>> = listOf(
+            "무지개" to intArrayOf(0xFFE53935.toInt(), 0xFFFB8C00.toInt(), 0xFFFDD835.toInt(), 0xFF43A047.toInt(), 0xFF1E88E5.toInt(), 0xFF3949AB.toInt(), 0xFF8E24AA.toInt()),
+            "노을" to intArrayOf(0xFF2B1B4D.toInt(), 0xFF8E3A8C.toInt(), 0xFFF2645A.toInt(), 0xFFFFB86B.toInt()),
+            "하늘" to intArrayOf(0xFF1E5AA8.toInt(), 0xFF6FB3E8.toInt(), 0xFFE8F4FB.toInt()),
+            "바다" to intArrayOf(0xFF03224C.toInt(), 0xFF0B6E99.toInt(), 0xFF5ED3D1.toInt()),
+            "금속" to intArrayOf(0xFF6E6E6E.toInt(), 0xFFF2F2F2.toInt(), 0xFF8A8A8A.toInt(), 0xFFDADADA.toInt()),
+        )
+    }
+}
 
     /**
  * 렌더링 엔진의 중심. GL 리소스는 모두 GL 스레드에서만 만집니다.
@@ -206,7 +238,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val prev = HashMap<Int, FloatArray>()
         }
 
-        class Gradient(val kind: Int, val c0: FloatArray, val c1: FloatArray, var p: FloatArray, val opacity: Float) : Op()
+        class Gradient(val kind: Int, val stops: FloatArray, val repeat: Int, var p: FloatArray, val opacity: Float) : Op()
 
         class Transform(val floating: RenderTarget, val bounds: IRect, var m: FloatArray, val whole: Boolean) : Op() {
             var lastRect: IRect = bounds
@@ -566,8 +598,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             cur.p = floatArrayOf(x0, y0, x1, y1)
         } else {
             finishOp()
-            val c1 = if (spec.toTransparent) premul(fg, 0f) else premul(bg, 1f)
-            op = Op.Gradient(if (spec.radial) 2 else 1, premul(fg, 1f), c1, floatArrayOf(x0, y0, x1, y1), opacity)
+            op = Op.Gradient(if (spec.radial) 2 else 1, spec.stops(fg, bg), spec.repeat, floatArrayOf(x0, y0, x1, y1), opacity)
         }
         markDirty(gradientRect(d))
     }
@@ -2065,7 +2096,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 val rect = gradientRect(d)
                 val p = o.p
                 commitToActive(rect, eraser = false) {
-                    compositor.drawMergeGradient(o.kind, o.c0, o.c1, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
+                    compositor.drawMergeGradient(o.kind, o.stops, o.repeat, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
                 }
             }
             is Op.Transform -> commitTransformGl(o, d)
@@ -3186,7 +3217,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     else -> GlState.over()
                 }
                 val p = o.p
-                compositor.drawMergeGradient(o.kind, o.c0, o.c1, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
+                compositor.drawMergeGradient(o.kind, o.stops, o.repeat, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
             }
             is Op.Transform -> {
                 if (!o.whole) {

@@ -56,6 +56,8 @@ class AppSettings(context: Context) {
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
+    var gradientPreset = 0
+    var gradientRepeat = 0
     var gradientOpacity = 1f
     /** 새 캔버스 배경: 투명이면 배경 레이어를 만들지 않습니다. */
     var canvasTransparent = false
@@ -132,6 +134,8 @@ class AppSettings(context: Context) {
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
+        gradientPreset = prefs.getInt("gradientPreset", if (gradientToTransparent) 1 else 0)
+        gradientRepeat = prefs.getInt("gradientRepeat", 0).coerceIn(0, 2)
         gradientOpacity = prefs.getFloat("gradientOpacity", 1f)
         canvasTransparent = prefs.getBoolean("canvasTransparent", false)
         canvasBackground = prefs.getInt("canvasBackground", Color.WHITE)
@@ -160,7 +164,7 @@ class AppSettings(context: Context) {
 
     val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillRef)
     val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandRef)
-    val gradientSpec: GradientSpec get() = GradientSpec(gradientRadial, gradientToTransparent)
+    val gradientSpec: GradientSpec get() = GradientSpec(gradientRadial, gradientPreset == 1, gradientPreset, gradientRepeat)
     /** 새 캔버스 배경색. null = 투명 */
     val newCanvasBackground: Int? get() = if (canvasTransparent) null else canvasBackground
 
@@ -206,6 +210,8 @@ class AppSettings(context: Context) {
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)
+            .putInt("gradientPreset", gradientPreset)
+            .putInt("gradientRepeat", gradientRepeat)
             .putFloat("gradientOpacity", gradientOpacity)
             .putBoolean("canvasTransparent", canvasTransparent)
             .putInt("canvasBackground", canvasBackground)

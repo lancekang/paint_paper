@@ -347,8 +347,20 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
     private fun buildGradient() {
         val s = host.settings
         view.addView(toggleRow(listOf("선형", "원형"), if (s.gradientRadial) 1 else 0) { s.gradientRadial = it == 1; s.save() }, lp(6f))
-        view.addView(toggleRow(listOf("주색→보조색", "주색→투명"), if (s.gradientToTransparent) 1 else 0) {
-            s.gradientToTransparent = it == 1; s.save()
+        // 색: 주색→보조색 / 주색→투명 / 프리셋들 (드롭다운)
+        val names = listOf("주색 → 보조색", "주색 → 투명") + kr.dfluid.paint.engine.GradientSpec.GRADIENT_PRESETS.map { it.first }
+        val spinner = android.widget.Spinner(ctx)
+        Ui.styleSpinner(spinner, names)
+        spinner.setSelection(s.gradientPreset.coerceIn(0, names.size - 1), false)
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                s.gradientPreset = pos; s.gradientToTransparent = pos == 1; s.save()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        view.addView(spinner, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 34f)).apply { topMargin = Ui.dp(ctx, 4f) })
+        view.addView(toggleRow(listOf("끝에서 멈춤", "반복", "거울 반복"), s.gradientRepeat) {
+            s.gradientRepeat = it; s.save()
         }, lp(4f))
         intSlider("불투명도", 1, 100, { (s.gradientOpacity * 100).roundToInt() }, { s.gradientOpacity = it / 100f }) { "$it%" }
         view.addView(hint("시작점에서 끝점까지 드래그합니다. 선택 영역이 있으면 그 안에만 칠합니다."), lp())

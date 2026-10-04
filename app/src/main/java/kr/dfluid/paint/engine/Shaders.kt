@@ -113,6 +113,10 @@ uniform vec2 u_p0;
 uniform vec2 u_p1;
 uniform vec2 u_canvas;
 uniform float u_opacity;
+uniform int u_nstops;
+uniform float u_stopPos[8];
+uniform vec4 u_stopCol[8];
+uniform int u_repeat;
 out vec4 o;
 void main() {
     vec4 c;
@@ -124,7 +128,16 @@ void main() {
         float t;
         if (u_kind == 1) t = dot(p - u_p0, d) / max(dot(d, d), 1e-6);
         else t = length(p - u_p0) / max(length(d), 1e-6);
-        c = mix(u_c0, u_c1, clamp(t, 0.0, 1.0));
+        if (u_repeat == 1) t = fract(t);
+        else if (u_repeat == 2) t = 1.0 - abs(mod(t, 2.0) - 1.0);
+        t = clamp(t, 0.0, 1.0);
+        c = u_stopCol[0];
+        for (int i = 1; i < 8; i++) {
+            if (i >= u_nstops) break;
+            float a = u_stopPos[i - 1];
+            float b = u_stopPos[i];
+            if (t >= a) c = mix(u_stopCol[i - 1], u_stopCol[i], clamp((t - a) / max(b - a, 1e-6), 0.0, 1.0));
+        }
     }
     c *= u_opacity;
     if (u_useSel == 1) c *= texture(u_sel, v_cuv).r;

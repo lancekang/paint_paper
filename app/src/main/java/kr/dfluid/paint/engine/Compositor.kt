@@ -116,11 +116,24 @@ class Compositor {
     }
 
     /** kind 1 = 선형, 2 = 원형. */
+    /** stops = [위치, r, g, b, a] × n (프리멀티플라이드, 최대 8), repeat 0 멈춤 / 1 반복 / 2 거울 */
     fun drawMergeGradient(
-        kind: Int, c0: FloatArray, c1: FloatArray, x0: Float, y0: Float, x1: Float, y1: Float,
+        kind: Int, stops: FloatArray, repeat: Int, x0: Float, y0: Float, x1: Float, y1: Float,
         opacity: Float, selTex: Int, canvasW: Int, canvasH: Int,
     ) {
-        setupMerge(kind, c0, c1, x0, y0, x1, y1, opacity, selTex, canvasW, canvasH)
+        val z = FloatArray(4)
+        setupMerge(kind, z, z, x0, y0, x1, y1, opacity, selTex, canvasW, canvasH)
+        val n = minOf(8, stops.size / 5)
+        val pos = FloatArray(8)
+        val col = FloatArray(32)
+        for (i in 0 until n) {
+            pos[i] = stops[i * 5]
+            for (k in 0 until 4) col[i * 4 + k] = stops[i * 5 + 1 + k]
+        }
+        GLES20.glUniform1i(merge.u("u_nstops"), n)
+        GLES20.glUniform1fv(merge.u("u_stopPos"), 8, pos, 0)
+        GLES20.glUniform4fv(merge.u("u_stopCol"), 8, col, 0)
+        GLES20.glUniform1i(merge.u("u_repeat"), repeat)
         quad.draw()
         unbind1()
     }
