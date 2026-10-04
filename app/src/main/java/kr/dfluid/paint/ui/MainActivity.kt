@@ -720,6 +720,11 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Ui.setOn(distortBtn, overlay.distort)
         }
         meshBtnRef = meshBtn
+        // 테마를 바꿔 바를 다시 만들 때도 지금 모드를 표시
+        if (::overlay.isInitialized) {
+            Ui.setOn(distortBtn, overlay.distort)
+            Ui.setOn(meshBtn, overlay.mesh)
+        }
         tb.addView(Ui.hspace(ctx, 8f))
         Ui.setOn(tbBtn(R.drawable.ic_check, "확정 (Enter)") { commitTransform() }, true)
         tbBtn(R.drawable.ic_close, "취소 (Esc)") { cancelTransform() }

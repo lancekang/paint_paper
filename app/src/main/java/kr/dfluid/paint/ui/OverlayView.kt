@@ -727,15 +727,17 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         val n = MeshWarp.N
         val steps = n * 8
         val p = FloatArray(2)
+        val ws = FloatArray(4)
+        val wt = FloatArray(4)
         path.reset()
         for (k in 0..n) {
             for (s in 0..steps) {
-                MeshWarp.sample(meshPts, s / 8f, k.toFloat(), p)
+                MeshWarp.sample(meshPts, s / 8f, k.toFloat(), p, ws, wt)
                 viewport.toScreen(p[0], p[1], p)
                 if (s == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1])
             }
             for (s in 0..steps) {
-                MeshWarp.sample(meshPts, k.toFloat(), s / 8f, p)
+                MeshWarp.sample(meshPts, k.toFloat(), s / 8f, p, ws, wt)
                 viewport.toScreen(p[0], p[1], p)
                 if (s == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1])
             }

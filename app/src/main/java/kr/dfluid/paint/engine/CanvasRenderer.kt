@@ -1244,6 +1244,42 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return d.allNodes().filter { n -> n.id in set && generateSequence(n.parent) { it.parent }.none { it.id in set } }
     }
 
+    /** [roots] 모두를 품는 가장 가까운 폴더 (루트 포함) */
+    private fun commonParent(roots: List<Node>): Node {
+        var a = roots[0].parent!!
+        for (n in roots) while (a !== n.parent && !a.isAncestorOf(n)) a = a.parent!!
+        return a
+    }
+
+    /** [anc]의 자식 중 [n]을 품은 것 (n 자신일 수도) */
+    private fun childUnder(anc: Node, n: Node): Node {
+        var c = n
+        while (c.parent !== anc) c = c.parent!!
+        return c
+    }
+
+    /** 고른 것만 묶거나 합치면 클리핑 관계가 바뀌는 경우의 안내 (괜찮으면 null) */
+    private fun clipProblem(roots: List<Node>): String? {
+        for (r in roots) {
+            val sib = r.parent?.children ?: continue
+            val i = r.index
+            if (r.isRaster && r.props.clip) {
+                var j = i - 1
+                while (j >= 0 && sib[j].isRaster && sib[j].props.clip) j--
+                val baseNode = sib.getOrNull(j)
+                if (baseNode != null && roots.none { it === baseNode }) return "클리핑 레이어는 기준 레이어와 함께 고르세요."
+            } else {
+                var j = i + 1
+                while (j < sib.size && sib[j].isRaster && sib[j].props.clip) {
+                    val c = sib[j]
+                    if (roots.none { it === c }) return "기준 레이어에 클리핑된 레이어(${c.props.name})도 함께 고르세요."
+                    j++
+                }
+            }
+        }
+        return null
+    }
+
     /** 여러 레이어를 한꺼번에 지웁니다 (실행취소 한 단계). */
     fun deleteNodes(ids: Collection<Int>) = post {
         finishOp()
@@ -1256,6 +1292,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return@post
         }
         structural { doc ->
+            // 활성 레이어가 남으면 그대로
+            val act = doc.active
+            if (act != null && roots.none { it === act || it.isAncestorOf(act) }) {
+                for (n in roots) n.parent?.children?.remove(n)
+                return@structural act.id
+            }
             val top = roots.last()
             val parent = top.parent
             // 지운 맨 위 레이어 바로 아래에 남는 형제를 고름
@@ -1272,11 +1314,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc ?: return@post
         val roots = selRoots(d, ids)
         if (roots.isEmpty()) return@post
+        clipProblem(roots)?.let { reportError(it); return@post }
         structural { doc ->
-            val top = roots.last()
-            val parent = top.parent ?: return@structural null
+            // 고른 것들을 모두 품는 폴더 안, 맨 위 레이어 자리에
+            val parent = commonParent(roots)
             val f = Node(doc.newId(), NodeKind.FOLDER, LayerProps(doc.nextFolderName(), blend = BlendMode.PASS_THROUGH))
-            insert(parent, top.index + 1, f)
+            insert(parent, childUnder(parent, roots.last()).index + 1, f)
             for (n in roots) {
                 n.parent?.children?.remove(n)
                 n.props = n.props.copy(clip = false)
@@ -1295,10 +1338,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             reportError("합칠 레이어를 두 개 이상 고르세요.")
             return@post
         }
-        if (roots.any { it.isFolder && it.props.animation }) {
-            reportError("애니메이션 폴더는 합칠 수 없습니다.")
+        if (roots.any { r -> generateSequence(r) { it.parent }.any { it.isFolder && it.props.animation } }) {
+            reportError("애니메이션 폴더나 그 안의 셀은 합칠 수 없습니다.")
             return@post
         }
+        if (roots.any { r -> generateSequence(r) { it.parent }.any { !it.props.visible } }) {
+            reportError("숨긴 레이어(또는 숨긴 폴더 안의 레이어)는 합칠 수 없습니다. 보이게 하거나 고르지 마세요.")
+            return@post
+        }
+        clipProblem(roots)?.let { reportError(it); return@post }
+        val home = commonParent(roots)
         // 고른 것 + 그 조상(폴더 효과) + 후손(폴더 내용)만 합성
         val allowed = HashSet<Int>()
         for (n in roots) {
@@ -1306,8 +1355,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             generateSequence(n.parent) { it.parent }.forEach { allowed.add(it.id) }
             d.allNodes().filter { n.isAncestorOf(it) }.forEach { allowed.add(it.id) }
         }
-        // 결과가 들어갈 폴더(맨 위 레이어의 조상)의 효과는 결과 레이어에 다시 적용되므로, 합성할 때는 잠깐 끔
-        val neutral = generateSequence(roots.last().parent) { it.parent }.filter { it.id != ROOT_ID }.toList()
+        // 결과가 들어갈 폴더(모두를 품는 폴더)와 그 위 폴더들의 효과는 결과 레이어에 다시 적용되므로, 합성할 때는 잠깐 끔.
+        // 그 아래 폴더의 효과는 결과에 구워 넣음
+        val neutral = generateSequence(home) { it.parent }.filter { it.id != ROOT_ID }.toList()
         val savedProps = neutral.map { it.props }
         val keepPlaying = animPlaying
         animPlaying = true
@@ -1330,9 +1380,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         structural { doc ->
             val top = roots.last()
-            val parent = top.parent ?: return@structural null
             val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(top.props.name))
-            insert(parent, top.index + 1, n)
+            insert(home, childUnder(home, top).index + 1, n)
             for (x in roots) x.parent?.children?.remove(x)
             n.id
         }

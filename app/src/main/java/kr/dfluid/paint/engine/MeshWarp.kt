@@ -52,9 +52,7 @@ object MeshWarp {
     }
 
     /** 곡면 위 점: 칸 (ci, cj) 안의 (s, t) ∈ [0,1] */
-    fun eval(g: FloatArray, ci: Int, cj: Int, s: Float, t: Float, out: FloatArray) {
-        val ws = FloatArray(4)
-        val wt = FloatArray(4)
+    fun eval(g: FloatArray, ci: Int, cj: Int, s: Float, t: Float, out: FloatArray, ws: FloatArray = FloatArray(4), wt: FloatArray = FloatArray(4)) {
         cr(s, ws)
         cr(t, wt)
         var x = 0f
@@ -69,10 +67,10 @@ object MeshWarp {
     }
 
     /** 전체 곡면을 [steps] 간격 점들로 (테두리·격자선 그리기용): 칸 u → 점 */
-    fun sample(g: FloatArray, gu: Float, gv: Float, out: FloatArray) {
+    fun sample(g: FloatArray, gu: Float, gv: Float, out: FloatArray, ws: FloatArray = FloatArray(4), wt: FloatArray = FloatArray(4)) {
         val ci = min(N - 1, gu.toInt().coerceAtLeast(0))
         val cj = min(N - 1, gv.toInt().coerceAtLeast(0))
-        eval(g, ci, cj, gu - ci, gv - cj, out)
+        eval(g, ci, cj, gu - ci, gv - cj, out, ws, wt)
     }
 
     /** 삼각형 목록 (x, y, u, v) — u,v는 떠 있는 텍스처 좌표 0..1 */
@@ -81,8 +79,10 @@ object MeshWarp {
         val vx = FloatArray((n + 1) * (n + 1))
         val vy = FloatArray((n + 1) * (n + 1))
         val p = FloatArray(2)
+        val ws = FloatArray(4)
+        val wt = FloatArray(4)
         for (j in 0..n) for (i in 0..n) {
-            sample(g, i.toFloat() / SUB, j.toFloat() / SUB, p)
+            sample(g, i.toFloat() / SUB, j.toFloat() / SUB, p, ws, wt)
             vx[j * (n + 1) + i] = p[0]
             vy[j * (n + 1) + i] = p[1]
         }
@@ -118,6 +118,8 @@ class MeshBuffer {
     private val vao: Int
     private val vbo: Int
     private var data: FloatBuffer? = null
+    /** 마지막으로 올린 배열 (같은 배열이면 다시 올리지 않음: 확정 때 타일마다 그리므로) */
+    private var uploaded: FloatArray? = null
 
     init {
         val ids = IntArray(1)
@@ -136,13 +138,16 @@ class MeshBuffer {
     }
 
     fun draw(tri: FloatArray) {
-        val buf = data?.takeIf { it.capacity() >= tri.size } ?: GlUtil.floatBuffer(tri.size).also { data = it }
-        buf.clear()
-        buf.put(tri)
-        buf.position(0)
-        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo)
-        GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, tri.size * 4, buf, GLES20.GL_STREAM_DRAW)
-        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        if (tri !== uploaded) {
+            val buf = data?.takeIf { it.capacity() >= tri.size } ?: GlUtil.floatBuffer(tri.size).also { data = it }
+            buf.clear()
+            buf.put(tri)
+            buf.position(0)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo)
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, tri.size * 4, buf, GLES20.GL_STREAM_DRAW)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+            uploaded = tri
+        }
         GLES30.glBindVertexArray(vao)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, tri.size / 4)
         GLES30.glBindVertexArray(0)
