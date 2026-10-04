@@ -30,6 +30,8 @@ class AppSettings(context: Context) {
     var wandTolerance = 10
     var wandGap = 0
     var wandExpand = 0
+    /** 선택 영역 확장/축소/경계 흐리기 범위 (px) */
+    var selModifyPx = 4
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
@@ -80,6 +82,7 @@ class AppSettings(context: Context) {
         wandTolerance = prefs.getInt("wandTolerance", 10)
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
+        selModifyPx = prefs.getInt("selModifyPx", 4)
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
@@ -133,6 +136,7 @@ class AppSettings(context: Context) {
             .putInt("wandTolerance", wandTolerance)
             .putInt("wandGap", wandGap)
             .putInt("wandExpand", wandExpand)
+            .putInt("selModifyPx", selModifyPx)
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)

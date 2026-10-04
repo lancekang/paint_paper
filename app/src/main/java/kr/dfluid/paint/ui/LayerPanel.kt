@@ -131,6 +131,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             tips.text("폴더로 묶기", Action.LAYER_GROUP),
             "이름 바꾸기",
             if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
+            "불투명한 부분을 선택 영역으로",
         )
         Ui.dialog(ctx)
             .setTitle(info.props.name)
@@ -142,6 +143,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     3 -> renderer.groupActive()
                     4 -> rename(info)
                     5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
+                    6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
                 }
             }
             .setNegativeButton("취소", null)

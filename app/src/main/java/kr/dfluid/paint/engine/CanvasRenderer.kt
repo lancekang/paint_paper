@@ -595,6 +595,47 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         commitSelectionChange(before)
     }
 
+    /** 선택 영역 확장/축소/경계 흐리기. 계산은 백그라운드. */
+    fun modifySelection(kind: SelModify, px: Int) = post {
+        val d = doc ?: return@post
+        if (op is Op.Transform) return@post
+        if (!hasSelection) {
+            reportError("선택 영역이 없습니다.")
+            return@post
+        }
+        cancelPreviewOps()
+        val m = selection ?: return@post
+        val buf = m.toBuffer()
+        val arr = ByteArray(buf.remaining()).also { buf.get(it) }
+        val w = d.width
+        val h = d.height
+        worker.execute {
+            val res = try {
+                SelectionOps.apply(arr, w, h, kind, px)
+            } catch (e: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 선택 영역을 바꾸지 못했습니다.") }
+                null
+            } ?: return@execute
+            post { applyWand(d, FloodFill.Result(res, IRect(0, 0, w, h)), SelOp.REPLACE) }
+        }
+    }
+
+    /** 활성 레이어(마스크 편집 중이면 레이어 픽셀)의 불투명한 부분으로 선택 영역을 만듭니다. */
+    fun selectFromLayer(selOp: SelOp) = post {
+        val d = doc ?: return@post
+        if (op is Op.Transform) return@post
+        val n = editableActive() ?: return@post
+        cancelPreviewOps()
+        val rgba = referenceImage(d, n, FillOptions.REF_CURRENT)
+        val alpha = ByteArray(d.width * d.height)
+        for (i in alpha.indices) alpha[i] = rgba.get(i * 4 + 3)
+        val before = selEncoded
+        val m = selection ?: SelectionMask(d.width, d.height).also { selection = it }
+        if (!hasSelection) m.clear()
+        m.applyMask(alpha, selOp)
+        commitSelectionChange(before)
+    }
+
     fun invertSelection() = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post

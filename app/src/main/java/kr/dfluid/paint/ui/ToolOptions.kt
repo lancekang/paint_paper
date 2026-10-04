@@ -27,6 +27,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         fun selectAll()
         fun deselect()
         fun invertSelection()
+        fun modifySelection(kind: kr.dfluid.paint.engine.SelModify, px: Int)
+        fun selectFromLayer()
         fun startTransform()
         fun onRecentColor(color: Int)
     }
@@ -276,6 +278,16 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
             })
         }
         view.addView(row, lp(8f))
+        // 선택 영역 편집
+        intSlider("범위", 1, 100, { s.selModifyPx }, { s.selModifyPx = it }) { "${it}px" }
+        val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for (k in kr.dfluid.paint.engine.SelModify.entries) {
+            row2.addView(Ui.button(ctx, k.label) { host.modifySelection(k, s.selModifyPx) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = Ui.dp(ctx, 4f)
+            })
+        }
+        view.addView(row2, lp(4f))
+        view.addView(Ui.button(ctx, "레이어의 불투명한 부분 선택") { host.selectFromLayer() }, lp(4f))
     }
 
     // ---- 채우기 ----

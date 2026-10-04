@@ -989,6 +989,11 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun selectAll() = renderer.selectAll()
     override fun deselect() = renderer.deselect()
     override fun invertSelection() = renderer.invertSelection()
+    override fun modifySelection(kind: kr.dfluid.paint.engine.SelModify, px: Int) {
+        showHud("선택 영역 ${kind.label} ${px}px")
+        renderer.modifySelection(kind, px)
+    }
+    override fun selectFromLayer() = renderer.selectFromLayer(settings.selectMode)
     override fun startTransform() {
         if (!transforming) renderer.beginTransform()
     }

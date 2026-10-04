@@ -13,6 +13,9 @@ import java.nio.ByteBuffer
 
 enum class SelOp { REPLACE, ADD, SUBTRACT, INTERSECT }
 
+/** 선택 영역 편집: 확장 / 축소 / 경계 흐리기 */
+enum class SelModify(val label: String) { GROW("확장"), SHRINK("축소"), FEATHER("경계 흐리기") }
+
 /** WAND = 자동 선택(누른 곳과 비슷한 색의 영역). 도형이 아니라 [SelectionMask.applyMask]로 반영합니다. */
 enum class SelShape { RECT, ELLIPSE, LASSO, WAND }
 
@@ -208,5 +211,126 @@ class SelectionMask(val width: Int, val height: Int) {
         private fun rectOf(pts: FloatArray) = RectF(
             minOf(pts[0], pts[2]), minOf(pts[1], pts[3]), maxOf(pts[0], pts[2]), maxOf(pts[1], pts[3])
         )
+    }
+}
+
+/**
+ * 선택 마스크(w*h 바이트, 0..255) 편집. 순수 계산이라 백그라운드 스레드에서 돌립니다.
+ * 확장/축소는 챔퍼(3-4) 거리 변환으로 둥근 모서리를, 경계 흐리기는 상자 흐림 3번(≈ 가우시안)을 씁니다.
+ */
+object SelectionOps {
+    fun apply(mask: ByteArray, w: Int, h: Int, kind: SelModify, px: Int): ByteArray = when (kind) {
+        SelModify.GROW -> grow(mask, w, h, px)
+        SelModify.SHRINK -> shrink(mask, w, h, px)
+        SelModify.FEATHER -> feather(mask, w, h, px)
+    }
+
+    /** 선택 안(>= 128)에서 거리 (px × 3). inside = true면 반대로 선택 밖에서의 거리. */
+    private fun distance(mask: ByteArray, w: Int, h: Int, fromOutside: Boolean): IntArray {
+        val inf = Int.MAX_VALUE / 2
+        val d = IntArray(w * h)
+        for (i in d.indices) {
+            val sel = (mask[i].toInt() and 0xFF) >= 128
+            d[i] = if (sel != fromOutside) 0 else inf
+        }
+        // 앞으로: 왼쪽, 왼쪽 위, 위, 오른쪽 위
+        for (y in 0 until h) {
+            val row = y * w
+            for (x in 0 until w) {
+                val i = row + x
+                var v = d[i]
+                if (v == 0) continue
+                if (x > 0) v = minOf(v, d[i - 1] + 3)
+                if (y > 0) {
+                    val up = i - w
+                    v = minOf(v, d[up] + 3)
+                    if (x > 0) v = minOf(v, d[up - 1] + 4)
+                    if (x < w - 1) v = minOf(v, d[up + 1] + 4)
+                }
+                d[i] = v
+            }
+        }
+        // 뒤로: 오른쪽, 오른쪽 아래, 아래, 왼쪽 아래
+        for (y in h - 1 downTo 0) {
+            val row = y * w
+            for (x in w - 1 downTo 0) {
+                val i = row + x
+                var v = d[i]
+                if (v == 0) continue
+                if (x < w - 1) v = minOf(v, d[i + 1] + 3)
+                if (y < h - 1) {
+                    val dn = i + w
+                    v = minOf(v, d[dn] + 3)
+                    if (x < w - 1) v = minOf(v, d[dn + 1] + 4)
+                    if (x > 0) v = minOf(v, d[dn - 1] + 4)
+                }
+                d[i] = v
+            }
+        }
+        return d
+    }
+
+    private fun grow(mask: ByteArray, w: Int, h: Int, px: Int): ByteArray {
+        val d = distance(mask, w, h, fromOutside = false)
+        val out = ByteArray(w * h)
+        for (i in out.indices) {
+            // 붙어 있는 픽셀 = 거리 1. 거리 px까지 채우고 그다음 1px은 부드럽게.
+            val add = ((px + 1f - d[i] / 3f).coerceIn(0f, 1f) * 255f).toInt()
+            out[i] = maxOf(mask[i].toInt() and 0xFF, add).toByte()
+        }
+        return out
+    }
+
+    private fun shrink(mask: ByteArray, w: Int, h: Int, px: Int): ByteArray {
+        val d = distance(mask, w, h, fromOutside = true)
+        val out = ByteArray(w * h)
+        for (i in out.indices) {
+            val keep = ((d[i] / 3f - px).coerceIn(0f, 1f) * 255f).toInt()
+            out[i] = minOf(mask[i].toInt() and 0xFF, keep).toByte()
+        }
+        return out
+    }
+
+    private fun feather(mask: ByteArray, w: Int, h: Int, px: Int): ByteArray {
+        val r = maxOf(1, (px + 1) / 2)
+        var a = IntArray(w * h) { mask[it].toInt() and 0xFF }
+        var b = IntArray(w * h)
+        repeat(3) {
+            boxH(a, b, w, h, r)
+            boxV(b, a, w, h, r)
+        }
+        return ByteArray(w * h) { a[it].coerceIn(0, 255).toByte() }
+    }
+
+    /** 가로 상자 흐림. 캔버스 밖은 0 (선택 안 됨). */
+    private fun boxH(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
+        val n = 2 * r + 1
+        for (y in 0 until h) {
+            val row = y * w
+            var sum = 0
+            for (x in 0..minOf(r, w - 1)) sum += src[row + x]
+            for (x in 0 until w) {
+                dst[row + x] = (sum + n / 2) / n
+                val add = x + r + 1
+                val sub = x - r
+                if (add < w) sum += src[row + add]
+                if (sub >= 0) sum -= src[row + sub]
+            }
+        }
+    }
+
+    private fun boxV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
+        val n = 2 * r + 1
+        for (x in 0 until w) {
+            var sum = 0
+            for (y in 0..minOf(r, h - 1)) sum += src[y * w + x]
+            for (y in 0 until h) {
+                dst[y * w + x] = (sum + n / 2) / n
+                val add = y + r + 1
+                val sub = y - r
+                if (add < h) sum += src[add * w + x]
+                if (sub >= 0) sum -= src[sub * w + x]
+            }
+        }
     }
 }
