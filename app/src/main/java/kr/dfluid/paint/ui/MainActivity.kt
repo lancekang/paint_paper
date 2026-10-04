@@ -45,6 +45,7 @@ import kr.dfluid.paint.input.CanvasView
 import kr.dfluid.paint.input.HoldMode
 import kr.dfluid.paint.input.SymMode
 import kr.dfluid.paint.input.Symmetry
+import kr.dfluid.paint.shortcut.ActionKind
 import kr.dfluid.paint.shortcut.Action
 import kr.dfluid.paint.shortcut.ShortcutDispatcher
 import kr.dfluid.paint.shortcut.ShortcutSettingsActivity
@@ -510,6 +511,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("앱")
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
         quickBtn = barBtn(R.drawable.ic_quick, "퀵 액세스 (자주 쓰는 기능 모음, + 로 추가 · 길게 눌러 빼기)") { toggleQuick() }
+        autoBtn = barBtn(R.drawable.ic_auto_action, "오토 액션 (단축키 동작을 기록해 한 번에 실행)") { showAutoActions() }
+        Ui.setOn(autoBtn!!, autoRecording != null)
         barBtn(R.drawable.ic_keyboard, "단축키 설정") { openShortcutSettings() }
         barBtn(R.drawable.ic_settings, "설정 (테마·필압 등)") { showSettings() }
         panelBtn = barBtn(R.drawable.ic_panel, "오른쪽 패널 접기/펼치기") {
@@ -2120,7 +2123,81 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         return super.dispatchKeyEvent(event)
     }
 
+    // ---- 오토 액션 ----
+
+    /** 기록 중이면 실행한 동작 목록 */
+    private var autoRecording: ArrayList<Action>? = null
+    private var autoRunning = false
+    private var autoBtn: ImageView? = null
+
+    private fun showAutoActions() {
+        val rec = autoRecording
+        if (rec != null) {
+            // 기록 끝내기 → 이름 붙여 저장
+            autoRecording = null
+            autoBtn?.let { Ui.setOn(it, false) }
+            if (rec.isEmpty()) {
+                showHud("기록한 동작이 없습니다")
+                return
+            }
+            val name = android.widget.EditText(this).apply {
+                setText("오토 액션 ${settings.autoActions.size + 1}")
+                setTextColor(Ui.TEXT)
+                selectAll()
+            }
+            Ui.dialog(this)
+                .setTitle("오토 액션 저장 (${rec.size}개 동작)")
+                .setMessage(rec.joinToString(" → ") { it.label })
+                .setView(name)
+                .setPositiveButton("저장") { _, _ ->
+                    val n = name.text.toString().trim().ifEmpty { "오토 액션 ${settings.autoActions.size + 1}" }
+                    settings.autoActions.add(n to rec.map { it.name })
+                    settings.save()
+                    showHud("\"$n\"을(를) 저장했습니다")
+                }
+                .setNegativeButton("버리기", null)
+                .show()
+            return
+        }
+        val list = settings.autoActions
+        val items = list.map { (n, a) -> "$n (${a.size})" } + "● 새로 기록하기"
+        Ui.dialog(this)
+            .setTitle("오토 액션")
+            .setItems(items.toTypedArray()) { _, i ->
+                if (i == list.size) {
+                    autoRecording = ArrayList()
+                    autoBtn?.let { Ui.setOn(it, true) }
+                    showHud("기록 중 · 단축키나 상단 바 버튼으로 동작하고, 오토 액션 버튼을 다시 누르면 끝")
+                    return@setItems
+                }
+                val (n, acts) = list[i]
+                Ui.dialog(this)
+                    .setTitle(n)
+                    .setMessage(acts.mapNotNull { a -> Action.entries.firstOrNull { it.name == a }?.label }.joinToString(" → "))
+                    .setPositiveButton("실행") { _, _ -> runAutoAction(acts) }
+                    .setNeutralButton("삭제") { _, _ ->
+                        list.removeAt(i)
+                        settings.save()
+                    }
+                    .setNegativeButton("닫기", null)
+                    .show()
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun runAutoAction(names: List<String>) {
+        autoRunning = true
+        try {
+            for (a in names) Action.entries.firstOrNull { it.name == a }?.let { onShortcut(it) }
+        } finally {
+            autoRunning = false
+        }
+    }
+
     override fun onShortcut(action: Action) {
+        // 오토 액션 기록 (누르고 있는 동안만 쓰는 동작은 빼고)
+        if (!autoRunning && action.kind != ActionKind.HOLD) autoRecording?.add(action)
         val v = canvasView.viewport
         when (action) {
             Action.BRUSH_SIZE_DOWN, Action.BRUSH_SIZE_UP -> activeBrush()?.let {

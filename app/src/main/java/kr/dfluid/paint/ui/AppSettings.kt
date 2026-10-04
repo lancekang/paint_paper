@@ -58,6 +58,8 @@ class AppSettings(context: Context) {
     var gridStep = 0
     /** 퀵 액세스: 담아 둔 동작 이름 (Action.name) */
     val quickActions = arrayListOf("UNDO", "REDO", "TOOL_PEN", "TOOL_ERASER", "SELECT_NONE", "TRANSFORM")
+    /** 오토 액션: 이름 → Action.name 목록 (순서대로 실행) */
+    val autoActions = ArrayList<Pair<String, List<String>>>()
     var quickOpen = false
     var quickFx = 0f
     var quickFy = 1f
@@ -157,6 +159,18 @@ class AppSettings(context: Context) {
         pickFromLayer = prefs.getBoolean("pickFromLayer", false)
         quickFx = prefs.getFloat("quickFx", 0f)
         quickFy = prefs.getFloat("quickFy", 1f)
+        prefs.getString("autoActions", null)?.let { raw ->
+            autoActions.clear()
+            try {
+                val arr = org.json.JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val acts = o.getJSONArray("actions")
+                    autoActions.add(o.getString("name") to List(acts.length()) { acts.getString(it) })
+                }
+            } catch (_: Exception) {
+            }
+        }
         prefs.getString("quickActions", null)?.let { q ->
             quickActions.clear()
             quickActions.addAll(q.split(",").filter { it.isNotBlank() })
@@ -250,6 +264,9 @@ class AppSettings(context: Context) {
             .putFloat("quickFx", quickFx)
             .putFloat("quickFy", quickFy)
             .putString("quickActions", quickActions.joinToString(","))
+            .putString("autoActions", org.json.JSONArray().apply {
+                for ((name, acts) in autoActions) put(org.json.JSONObject().put("name", name).put("actions", org.json.JSONArray(acts)))
+            }.toString())
             .putFloat("navFx", navFx)
             .putFloat("navFy", navFy)
             .putString("subUri", subUri)
