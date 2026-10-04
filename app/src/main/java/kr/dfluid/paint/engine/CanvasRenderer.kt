@@ -1730,6 +1730,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // =====================================================================
 
     /** 합성 결과에서 색을 집습니다. 투명한 곳이면 콜백을 부르지 않습니다. */
+    /** 스포이드: true면 합성 결과 대신 현재 레이어에서 */
+    @Volatile var pickFromLayer = false
+
     fun pickColor(x: Int, y: Int, callback: (Int) -> Unit) = post {
         pendingPicks.add(intArrayOf(x, y) to callback)
     }
@@ -3456,7 +3459,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val x = pos[0]
             val y = pos[1]
             if (x !in 0 until d.width || y !in 0 until d.height) continue
-            val px = comp.read(x, y, 1, 1)
+            val px = if (pickFromLayer) {
+                val n = d.active?.takeIf { it.isRaster } ?: continue
+                val s = surfaces[n.id] ?: continue
+                val key = s.key(x / TILE, y / TILE)
+                val t = s.tiles[key] ?: continue
+                s.bindLocal(t)
+                val buf = GlUtil.byteBuffer(4)
+                GLES20.glPixelStorei(GLES20.GL_PACK_ALIGNMENT, 1)
+                GLES20.glReadPixels(x - s.originX(key), y - s.originY(key), 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+                buf.rewind()
+                buf
+            } else comp.read(x, y, 1, 1)
             val r = px.get(0).toInt() and 0xFF
             val g = px.get(1).toInt() and 0xFF
             val b = px.get(2).toInt() and 0xFF

@@ -34,6 +34,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         /** 보조 도구를 파일로 내보내기 / 파일에서 가져오기 */
         fun exportBrushFile(brush: Brush)
         fun importBrushFile()
+        fun onPickModeChanged()
     }
 
     val view = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -89,7 +90,14 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
                 view.addView(Ui.button(ctx, "자유 변형 (Ctrl+T)") { host.startTransform() }, lp(8f))
             }
             tool == Tool.TEXT -> view.addView(hint("캔버스를 누르면 그 자리에 글을 넣습니다. 텍스트 레이어를 선택한 채 글자 위를 누르면 다시 고칩니다. 색은 주색, 옮기기는 이동 도구. 붓으로 그리려면 레이어 ⋯ → 래스터화."), lp())
-            tool == Tool.EYEDROPPER -> view.addView(hint("누른 곳의 색을 주색으로 가져옵니다. Alt를 누르고 있으면 다른 도구에서도 스포이드가 됩니다."), lp())
+            tool == Tool.EYEDROPPER -> {
+                val s = host.settings
+                view.addView(toggleRow(listOf("보이는 색 (모든 레이어)", "현재 레이어"), if (s.pickFromLayer) 1 else 0) {
+                    s.pickFromLayer = it == 1; s.save()
+                    host.onPickModeChanged()
+                }, lp(2f))
+                view.addView(hint("누른 곳의 색을 주색으로 가져옵니다. Alt를 누르고 있으면 다른 도구에서도 스포이드가 됩니다."), lp())
+            }
             tool == Tool.HAND -> view.addView(hint("드래그해 화면을 옮깁니다. Space를 누르고 있어도 됩니다."), lp())
         }
         refreshRecent()

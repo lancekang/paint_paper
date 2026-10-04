@@ -205,6 +205,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer = CanvasRenderer(this)
         renderer.setBackdrop(Ui.CANVAS_BG)
         renderer.tipProvider = { id -> library.tip(id) }
+        renderer.pickFromLayer = settings.pickFromLayer
         renderer.defaultBackground = settings.newCanvasBackground
         canvasView = CanvasView(this, renderer)
         canvasView.host = this
@@ -1448,6 +1449,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             putExtra(Intent.EXTRA_TITLE, brush.name.map { if (it.isLetterOrDigit() || it == ' ' || it == '-') it else '_' }.joinToString("") + ".dfbrush")
         }
         startActivityForResult(intent, REQ_BRUSH_EXPORT)
+    }
+
+    override fun onPickModeChanged() {
+        renderer.pickFromLayer = settings.pickFromLayer
     }
 
     override fun importBrushFile() {

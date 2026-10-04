@@ -48,6 +48,8 @@ class AppSettings(context: Context) {
     var animFps = 12
     /** 서브 뷰 (참고 이미지 창) */
     var subOpen = false
+    /** 스포이드: true = 현재 레이어에서 */
+    var pickFromLayer = false
     /** 격자 간격 (px, 0 = 끔) */
     var gridStep = 0
     /** 퀵 액세스: 담아 둔 동작 이름 (Action.name) */
@@ -143,6 +145,7 @@ class AppSettings(context: Context) {
         navOpen = prefs.getBoolean("navOpen", false)
         quickOpen = prefs.getBoolean("quickOpen", false)
         gridStep = prefs.getInt("gridStep", 0).coerceIn(0, 2000)
+        pickFromLayer = prefs.getBoolean("pickFromLayer", false)
         quickFx = prefs.getFloat("quickFx", 0f)
         quickFy = prefs.getFloat("quickFy", 1f)
         prefs.getString("quickActions", null)?.let { q ->
@@ -231,6 +234,7 @@ class AppSettings(context: Context) {
             .putBoolean("navOpen", navOpen)
             .putBoolean("quickOpen", quickOpen)
             .putInt("gridStep", gridStep)
+            .putBoolean("pickFromLayer", pickFromLayer)
             .putFloat("quickFx", quickFx)
             .putFloat("quickFy", quickFy)
             .putString("quickActions", quickActions.joinToString(","))
