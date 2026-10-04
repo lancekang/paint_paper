@@ -212,7 +212,11 @@ object Dialogs {
         val dlg = Ui.dialog(ctx)
             .setTitle("필압 자동 조정")
             .setView(body)
-            .setPositiveButton("적용") { _, _ -> board.suggestGamma()?.let(onApply) }
+            .setPositiveButton("적용") { _, _ ->
+                val g = board.suggestGamma()
+                if (g != null) onApply(g)
+                else android.widget.Toast.makeText(ctx, "그은 양이 적어 바꾸지 않았습니다. 여러 번 더 그어 주세요.", android.widget.Toast.LENGTH_SHORT).show()
+            }
             .setNegativeButton("취소", null)
             .setNeutralButton("다시", null)
             .create()

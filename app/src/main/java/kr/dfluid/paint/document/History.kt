@@ -49,6 +49,9 @@ class History(
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
     val undoCount: Int get() = undoStack.size
+    /** 한도 때문에 오래된 단계를 버린 적이 있는지 */
+    var trimmed = false
+        private set
 
     /** 다음 [push]에 붙일 이름 (작업 내역 창용). 없으면 커맨드 종류로 짐작 */
     var nextLabel: String? = null
@@ -76,6 +79,7 @@ class History(
         while (undoStack.size > 1 && (undoStack.size > maxSteps || total > maxBytes)) {
             val c = undoStack.removeFirst()
             labels.remove(c)
+            trimmed = true
             total -= c.bytes
         }
     }
@@ -109,6 +113,7 @@ class History(
         undoStack.clear()
         redoStack.clear()
         labels.clear()
+        trimmed = false
     }
 
     private fun describe(c: HistoryCommand): String = when (c) {

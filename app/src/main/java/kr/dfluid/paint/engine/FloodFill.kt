@@ -105,7 +105,7 @@ object FloodFill {
             if (x !in 0 until w || y !in 0 until h) continue
             val k = y * w + x
             if (acc != null && acc[k].toInt() != 0) continue
-            if (isInk(px, k * 4)) continue
+            if (nearInk(px, w, h, x, y)) continue
             val r = run(ref, w, h, x, y, tolerance, gap, expand, selection) ?: continue
             runs++
             val a = acc ?: ByteArray(w * h).also { acc = it }
@@ -125,6 +125,16 @@ object FloodFill {
         val out = acc ?: return null
         if (maxX < 0) return null
         return Result(out, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
+    }
+
+    /** 씨앗이 선 위이거나 선 가장자리(2px 안)에 있으면 true (가장자리 회색에서 시작하면 선을 따라 번지므로) */
+    private fun nearInk(px: ByteBuffer, w: Int, h: Int, x: Int, y: Int): Boolean {
+        for (dy in -2..2) for (dx in -2..2) {
+            val xx = x + dx; val yy = y + dy
+            if (xx !in 0 until w || yy !in 0 until h) continue
+            if (isInk(px, (yy * w + xx) * 4)) return true
+        }
+        return false
     }
 
     /** 선으로 볼 픽셀: 반 이상 불투명하고 어두움 (프리멀티플라이드 RGBA) */

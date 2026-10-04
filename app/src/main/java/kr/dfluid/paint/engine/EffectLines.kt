@@ -55,7 +55,7 @@ object EffectLines {
                 val oy = cy + dy * far
                 val w = spec.width * (1f - spec.jitter * 0.5f * rnd.nextFloat())
                 // 바깥(t = 0)이 굵고 안쪽(t = 1)으로 가늘게
-                out.add(line(ox, oy, ix, iy, alpha) { t -> w / 2f * (if (spec.taper) (1f - t).pow(0.7f) else 1f) })
+                out.add(line(ox, oy, ix, iy, alpha, canvasW, canvasH, w) { t -> w / 2f * (if (spec.taper) (1f - t).pow(0.7f) else 1f) })
             }
         } else {
             val ang = Math.toRadians(spec.angleDeg.toDouble()).toFloat()
@@ -74,21 +74,36 @@ object EffectLines {
                 val by = cy + ny * off + dy * start
                 val w = spec.width * (1f - spec.jitter * 0.5f * rnd.nextFloat())
                 // 가운데가 굵고 양 끝이 가늘게
-                out.add(line(bx, by, bx + dx * len, by + dy * len, alpha) { t ->
+                out.add(line(bx, by, bx + dx * len, by + dy * len, alpha, canvasW, canvasH, w) { t ->
                     w / 2f * (if (spec.taper) sin(PI.toFloat() * t).coerceAtLeast(0f).pow(0.6f) else 1f)
                 })
             }
         }
-        return out
+        return out.filter { it.isNotEmpty() }
     }
 
-    /** (x0,y0)→(x1,y1) 직선을 반지름 함수 [radius](t ∈ 0..1)로 스탬프 */
-    private fun line(x0: Float, y0: Float, x1: Float, y1: Float, alpha: Float, radius: (Float) -> Float): FloatArray {
+    /** (x0,y0)→(x1,y1) 직선을 반지름 함수 [radius](t ∈ 0..1)로 스탬프. 캔버스(+굵기) 밖 구간은 뺌 */
+    private fun line(x0: Float, y0: Float, x1: Float, y1: Float, alpha: Float, cw: Int, ch: Int, width: Float, radius: (Float) -> Float): FloatArray {
         val len = hypot(x1 - x0, y1 - y0)
         var buf = FloatArray(StrokeBuilder.FLOATS * 256)
         var n = 0
-        var d = 0f
-        while (d <= len) {
+        // Liang–Barsky로 캔버스 안에 드는 t 구간
+        val m = width + 2f
+        var t0 = 0f
+        var t1 = 1f
+        val ddx = x1 - x0
+        val ddy = y1 - y0
+        fun clip(p: Float, q: Float): Boolean {
+            if (p == 0f) return q >= 0f
+            val r = q / p
+            if (p < 0f) { if (r > t1) return false; if (r > t0) t0 = r }
+            else { if (r < t0) return false; if (r < t1) t1 = r }
+            return true
+        }
+        if (!(clip(-ddx, x0 + m) && clip(ddx, cw + m - x0) && clip(-ddy, y0 + m) && clip(ddy, ch + m - y0))) return FloatArray(0)
+        var d = t0 * len
+        val end = t1 * len
+        while (d <= end) {
             val t = if (len > 0f) d / len else 0f
             var r = radius(t)
             var a = alpha

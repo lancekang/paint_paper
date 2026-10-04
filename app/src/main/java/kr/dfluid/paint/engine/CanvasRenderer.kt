@@ -505,13 +505,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 변형/그라데이션/필터 중의 실행취소는 그 작업만 취소합니다. */
     /** 작업 내역: (이름들, 지금 위치). 0번 = "처음 상태", 위치 = 실행취소할 수 있는 단계 수 */
     fun historyList(done: (List<String>, Int) -> Unit) = post {
-        val names = listOf("처음 상태") + history.undoLabels() + history.redoLabels()
+        val names = listOf(if (history.trimmed) "(이전 단계는 기록 한도로 지워짐)" else "처음 상태") + history.undoLabels() + history.redoLabels()
         val pos = history.undoCount
         main.post { done(names, pos) }
     }
 
     /** 작업 내역의 [target]번 상태로 (그 사이를 실행취소/다시실행으로 한꺼번에) */
-    fun jumpHistory(target: Int) = post {
+    fun jumpHistory(target: Int, expectedTotal: Int = -1) = post {
+        // 목록을 연 뒤에 단계가 바뀌었으면 (채우기 결과 도착 등) 번호가 어긋나므로 무시
+        if (expectedTotal >= 0 && history.undoCount + history.redoLabels().size != expectedTotal) {
+            reportError("작업 내역이 바뀌었습니다. 다시 열어 주세요.")
+            return@post
+        }
         if (op is Op.Transform || op is Op.Gradient || op is Op.Filter) cancelPreviewOps()
         finishOp()
         var moved = false
@@ -751,7 +756,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc
         if (d !== docRef) return
         if (op != null) {
-            main.postDelayed({ post { labeled("채우기") { applyFill(docRef, targetId, res, color, opacity) } } }, 60)
+            val label = history.nextLabel ?: "채우기"
+            main.postDelayed({ post { labeled(label) { applyFill(docRef, targetId, res, color, opacity) } } }, 60)
             return
         }
         if (d.activeId != targetId) return
@@ -2011,6 +2017,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return@post
         }
         if (strokes.isEmpty()) return@post
+        history.nextLabel = if (spec.kind == 0) "집중선" else "유선"
         structural { doc ->
             val a = doc.active
             val parent = a?.parent ?: doc.root
@@ -2702,6 +2709,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         toneBuf?.release(); toneBuf = null
         adjBuf?.release(); adjBuf = null
         navTarget?.release(); navTarget = null
+        tlTarget?.release(); tlTarget = null
+        tlSent = -1L
         navSent = -1L
         colorBuf?.release(); colorBuf = null
         paperBuf?.release(); paperBuf = null
@@ -2738,6 +2747,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         adjBuf = null
         navTarget = null
         navSent = -1L
+        tlTarget = null
+        tlSent = -1L
         colorBuf = null
         paperBuf = null
         wcBuf = null
@@ -3416,7 +3427,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val b = v.bounds
             val vr = IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height) ?: continue
             val r = vr.intersect(area) ?: continue
-            sb.clear()
+            sb.clear(r)
             v.fill?.let { rasterizeFill(it, d) }
             val tip = v.brush.tipId?.let { id -> tips[id] ?: tipProvider(id)?.let { ensureTip(it) } } ?: 0
             brushEngine.draw(sb, v.stamps, v.brush, tip)
@@ -3745,7 +3756,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         while (i < to) {
             val n = nodes[i]
             var j = i + 1
-            while (j < to && nodes[j].isRaster && nodes[j].props.clip) j++
+            // 색조 보정 레이어는 클리핑 기준도, 클리핑되는 쪽도 되지 않음 (위의 클리핑 레이어는 각자 그려짐)
+            if (n.props.adjustKind == null) {
+                while (j < to && nodes[j].isRaster && nodes[j].props.clip && nodes[j].props.adjustKind == null) j++
+            }
             val p = n.props
             val only = composeOnly
             if (p.visible && p.opacity > 0f && !(hideDrafts && p.draft) && (only == null || n.id in only)) {
@@ -3835,10 +3849,13 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun addAdjustLayer(kind: FilterKind, values: List<Float>, done: (Int, LayerProps) -> Unit) = post {
         finishOp()
         var props: LayerProps? = null
+        history.nextLabel = "색조 보정 레이어"
         structural { d ->
             val a = d.active
             val parent = a?.parent ?: d.root
-            val idx = if (a != null) a.index + 1 else parent.children.size
+            // 클리핑 묶음을 가르지 않게, 활성 위의 클리핑 레이어들 다음에
+            var idx = if (a != null) a.index + 1 else parent.children.size
+            while (idx < parent.children.size && parent.children[idx].isRaster && parent.children[idx].props.clip) idx++
             val p = LayerProps("보정: " + kind.label.substringBefore(" ("), adjustKind = kind.name, adjustValues = values)
             val n = Node(d.newId(), NodeKind.RASTER, p)
             insert(parent, idx, n)

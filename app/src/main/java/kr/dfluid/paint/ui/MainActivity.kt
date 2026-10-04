@@ -1688,7 +1688,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             }
             val dlg = Ui.dialog(this)
                 .setTitle("작업 내역 (${names.size - 1}단계)")
-                .setItems(items.toTypedArray()) { _, i -> if (i != pos) renderer.jumpHistory(i) }
+                .setItems(items.toTypedArray()) { _, i -> if (i != pos) renderer.jumpHistory(i, names.size - 1) }
                 .setNegativeButton("닫기", null)
                 .create()
             dlg.setOnShowListener { dlg.listView?.setSelection((pos - 3).coerceAtLeast(0)) }
@@ -2837,6 +2837,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     private fun exportPsd() {
+        if (lastNodes.any { it.props.adjustKind != null }) {
+            Toast.makeText(this, "색조 보정 레이어는 PSD에서 빈 레이어가 됩니다 (합친 이미지에는 들어감).", Toast.LENGTH_LONG).show()
+        }
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "image/vnd.adobe.photoshop"
