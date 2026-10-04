@@ -220,6 +220,7 @@ object BrushEditor {
         param("각도", 0f, 360f, { b.angleDeg }, { b.angleDeg = it }) { "${it.roundToInt()}°" }
         param("각도 흔들림", 0f, 1f, { b.angleJitter }, { b.angleJitter = it }, pct)
         param("크기 흔들림", 0f, 1f, { b.sizeJitter }, { b.sizeJitter = it }, pct)
+        param("살포", 0f, 4f, { b.scatter }, { b.scatter = it }) { "${(it * 100).roundToInt()}%" }
 
         val scroll = ScrollView(ctx).apply { addView(root) }
         Ui.dialog(ctx)
@@ -248,6 +249,7 @@ object BrushEditor {
                 original.angleDeg = b.angleDeg
                 original.angleJitter = b.angleJitter
                 original.sizeJitter = b.sizeJitter
+                original.scatter = b.scatter
                 original.taperIn = if (b.taperIn < 0.5f) 0f else b.taperIn
                 original.taperOut = if (b.taperOut < 0.5f) 0f else b.taperOut
                 library.save()

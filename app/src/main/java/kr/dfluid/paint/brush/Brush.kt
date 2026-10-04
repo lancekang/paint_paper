@@ -72,6 +72,8 @@ data class Brush(
     var angleDeg: Float = 0f,
     var angleJitter: Float = 0f,
     var sizeJitter: Float = 0f,
+    /** 살포: 스탬프 위치를 진행 방향과 상관없이 흩뿌림 (지름 × 이 값까지, 0 = 끔) */
+    var scatter: Float = 0f,
     var curve: FloatArray = floatArrayOf(0f, 0f, 1f, 1f),
     var taperIn: Float = 0f,
     var taperOut: Float = 0f,
@@ -123,6 +125,7 @@ data class Brush(
         .put("angleDeg", angleDeg.toDouble())
         .put("angleJitter", angleJitter.toDouble())
         .put("sizeJitter", sizeJitter.toDouble())
+        .put("scatter", scatter.toDouble())
         .put("curve", JSONArray(curve.map { it.toDouble() }))
         .put("taperIn", taperIn.toDouble())
         .put("taperOut", taperOut.toDouble())
@@ -174,6 +177,7 @@ data class Brush(
                 angleDeg = f("angleDeg", 0f),
                 angleJitter = f("angleJitter", 0f).coerceIn(0f, 1f),
                 sizeJitter = f("sizeJitter", 0f).coerceIn(0f, 1f),
+                scatter = f("scatter", 0f).coerceIn(0f, 4f),
                 curve = curve,
                 taperIn = f("taperIn", 0f).coerceIn(0f, TAPER_MAX),
                 taperOut = f("taperOut", 0f).coerceIn(0f, TAPER_MAX),

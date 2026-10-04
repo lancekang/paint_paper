@@ -135,8 +135,17 @@ class StrokeBuilder {
         }
         if ((count + 1) * FLOATS > out.size) out = out.copyOf(out.size * 2)
         val i = count * FLOATS
-        out[i] = x
-        out[i + 1] = y
+        // 살포: 원 안 아무 곳으로 (반지름 = 지름 × scatter)
+        var sx = x
+        var sy = y
+        if (b.scatter > 0f) {
+            val a = rnd.nextFloat() * (2 * PI).toFloat()
+            val d = kotlin.math.sqrt(rnd.nextFloat()) * r * 2f * b.scatter
+            sx += cos(a) * d
+            sy += sin(a) * d
+        }
+        out[i] = sx
+        out[i + 1] = sy
         out[i + 2] = r
         out[i + 3] = rot
         out[i + 4] = aspectFor(t)
