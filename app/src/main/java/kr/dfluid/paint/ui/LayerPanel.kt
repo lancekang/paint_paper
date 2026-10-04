@@ -130,6 +130,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             tips.text("레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR),
             tips.text("폴더로 묶기", Action.LAYER_GROUP),
             "이름 바꾸기",
+            if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
         )
         Ui.dialog(ctx)
             .setTitle(info.props.name)
@@ -140,6 +141,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     2 -> renderer.clearLayer()
                     3 -> renderer.groupActive()
                     4 -> rename(info)
+                    5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
                 }
             }
             .setNegativeButton("취소", null)
@@ -264,6 +266,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             append((p.opacity * 100).roundToInt()).append('%')
             if (p.blend != BlendMode.NORMAL) append(" · ").append(p.blend.label)
             if (p.alphaLock) append(" · 잠금")
+            if (p.reference) append(" · 참조")
             if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }

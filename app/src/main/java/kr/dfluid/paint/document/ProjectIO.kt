@@ -57,6 +57,7 @@ object ProjectIO {
                     .put("alphaLock", n.props.alphaLock)
                     .put("clip", n.props.clip)
                     .put("expanded", n.props.expanded)
+                    .put("reference", n.props.reference)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
                 if (n.kind == NodeKind.RASTER && n.props.mask) {
                     o.put("mask", true).put("maskEnabled", n.props.maskEnabled).put("maskFile", "layers/${n.id}_mask.png")
@@ -187,6 +188,7 @@ object ProjectIO {
         expanded = o.optBoolean("expanded", true),
         mask = o.optBoolean("mask", false),
         maskEnabled = o.optBoolean("maskEnabled", true),
+        reference = o.optBoolean("reference", false),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

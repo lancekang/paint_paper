@@ -24,12 +24,13 @@ class AppSettings(context: Context) {
     var fillTolerance = 10
     var fillGap = 0
     var fillExpand = 1
-    var fillReferenceAll = true
+    /** FillOptions.REF_ALL / REF_CURRENT / REF_MARKED */
+    var fillRef = FillOptions.REF_ALL
     var fillOpacity = 1f
     var wandTolerance = 10
     var wandGap = 0
     var wandExpand = 0
-    var wandReferenceAll = true
+    var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
     var gradientOpacity = 1f
@@ -74,12 +75,12 @@ class AppSettings(context: Context) {
         fillTolerance = prefs.getInt("fillTolerance", 10)
         fillGap = prefs.getInt("fillGap", 0)
         fillExpand = prefs.getInt("fillExpand", 1)
-        fillReferenceAll = prefs.getBoolean("fillReferenceAll", true)
+        fillRef = prefs.getInt("fillRef", if (prefs.getBoolean("fillReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         fillOpacity = prefs.getFloat("fillOpacity", 1f)
         wandTolerance = prefs.getInt("wandTolerance", 10)
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
-        wandReferenceAll = prefs.getBoolean("wandReferenceAll", true)
+        wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
         gradientOpacity = prefs.getFloat("gradientOpacity", 1f)
@@ -102,8 +103,8 @@ class AppSettings(context: Context) {
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
     }
 
-    val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillReferenceAll)
-    val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandReferenceAll)
+    val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillRef)
+    val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandRef)
     val gradientSpec: GradientSpec get() = GradientSpec(gradientRadial, gradientToTransparent)
     /** 새 캔버스 배경색. null = 투명 */
     val newCanvasBackground: Int? get() = if (canvasTransparent) null else canvasBackground
@@ -127,12 +128,12 @@ class AppSettings(context: Context) {
             .putInt("fillTolerance", fillTolerance)
             .putInt("fillGap", fillGap)
             .putInt("fillExpand", fillExpand)
-            .putBoolean("fillReferenceAll", fillReferenceAll)
+            .putInt("fillRef", fillRef)
             .putFloat("fillOpacity", fillOpacity)
             .putInt("wandTolerance", wandTolerance)
             .putInt("wandGap", wandGap)
             .putInt("wandExpand", wandExpand)
-            .putBoolean("wandReferenceAll", wandReferenceAll)
+            .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)
             .putFloat("gradientOpacity", gradientOpacity)

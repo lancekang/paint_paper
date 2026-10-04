@@ -39,7 +39,14 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** 채우기 옵션. */
-data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val referenceAll: Boolean)
+/** [ref] = 어느 그림을 보고 영역을 찾을지: REF_ALL / REF_CURRENT / REF_MARKED */
+data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val ref: Int) {
+    companion object {
+        const val REF_ALL = 0
+        const val REF_CURRENT = 1
+        const val REF_MARKED = 2
+    }
+}
 
 /** 그라데이션 옵션. */
 data class GradientSpec(val radial: Boolean, val toTransparent: Boolean)
@@ -317,7 +324,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc ?: return@post
         val n = editableActive() ?: return@post
         finishOp()
-        val ref = referenceImage(d, n, opts.referenceAll)
+        val ref = referenceImage(d, n, opts.ref)
         val sel = if (hasSelection) selection?.toBuffer() else null
         val w = d.width
         val h = d.height
@@ -335,8 +342,24 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
-    private fun referenceImage(d: Document, n: Node, all: Boolean): ByteBuffer {
-        if (all) {
+    private fun referenceImage(d: Document, n: Node, ref: Int): ByteBuffer {
+        if (ref == FillOptions.REF_MARKED) {
+            // 참조 레이어로 지정한 보이는 레이어들만 아래 → 위로 겹쳐서
+            val marked = d.allNodes().filter { it.isRaster && it.props.reference && visibleInTree(it) }
+            if (marked.isNotEmpty()) {
+                val pv = preview!!
+                pv.clear()
+                pv.bind()
+                GlState.over()
+                val full = IRect(0, 0, d.width, d.height)
+                for (m in marked) drawSourceCopy(Src.Tiles(surfaces[m.id]!!), m.props.opacity, full)
+                GlState.off()
+                markAllDirty() // preview 버퍼를 빌려 썼음
+                return pv.readAll()
+            }
+            main.post { listener.onRendererError("참조 레이어가 없어 모든 레이어를 보고 찾습니다. 레이어 ⋯ 메뉴에서 지정하세요.") }
+        }
+        if (ref != FillOptions.REF_CURRENT) {
             ensureComposite(d)
             return compResult!!.readAll()
         }
@@ -355,10 +378,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectByColor(x: Int, y: Int, opts: FillOptions, selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = if (opts.referenceAll) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive()
+        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive()
         if (n == null) return@post
         cancelPreviewOps()
-        val ref = referenceImage(d, n, opts.referenceAll)
+        val ref = referenceImage(d, n, opts.ref)
         val w = d.width
         val h = d.height
         val docRef = d
@@ -1662,6 +1685,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 증분 합성을 시작할 루트 자식의 인덱스 (활성 노드의 루트 조상, 클리핑이면 그 기준 레이어). */
+    /** 자신과 모든 조상 폴더가 보이는지 */
+    private fun visibleInTree(n: Node): Boolean {
+        var p: Node? = n
+        while (p != null && p.id != ROOT_ID) {
+            if (!p.props.visible) return false
+            p = p.parent
+        }
+        return true
+    }
+
     /** 노드의 루트 조상이 루트 자식 중 몇 번째인지. */
     private fun rootIndexOf(d: Document, node: Node): Int {
         var n = node

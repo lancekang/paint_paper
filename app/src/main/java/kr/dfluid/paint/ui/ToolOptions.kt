@@ -257,8 +257,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         }, lp(6f))
         view.addView(toggleRow(listOf("새로", "추가", "빼기", "교차"), s.selectMode.ordinal) { s.selectMode = SelOp.entries[it]; s.save() }, lp(4f))
         if (s.selectShape == SelShape.WAND) {
-            view.addView(toggleRow(listOf("모든 레이어 참조", "현재 레이어"), if (s.wandReferenceAll) 0 else 1) {
-                s.wandReferenceAll = it == 0; s.save()
+            view.addView(toggleRow(listOf("모든 레이어", "현재 레이어", "참조 레이어"), s.wandRef) {
+                s.wandRef = it; s.save()
             }, lp(6f))
             intSlider("허용 오차", 0, 100, { s.wandTolerance * 100 / 255 }, { s.wandTolerance = it * 255 / 100 }) { "$it" }
             intSlider("틈 메우기", 0, 10, { s.wandGap }, { s.wandGap = it }) { if (it == 0) "끔" else "${it}px" }
@@ -282,8 +282,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildFill() {
         val s = host.settings
-        view.addView(toggleRow(listOf("모든 레이어 참조", "현재 레이어"), if (s.fillReferenceAll) 0 else 1) {
-            s.fillReferenceAll = it == 0; s.save()
+        view.addView(toggleRow(listOf("모든 레이어", "현재 레이어", "참조 레이어"), s.fillRef) {
+            s.fillRef = it; s.save()
         }, lp(6f))
         intSlider("허용 오차", 0, 100, { s.fillTolerance * 100 / 255 }, { s.fillTolerance = it * 255 / 100 }) { "$it" }
         intSlider("틈 메우기", 0, 10, { s.fillGap }, { s.fillGap = it }) { if (it == 0) "끔" else "${it}px" }

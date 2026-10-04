@@ -39,6 +39,8 @@ data class LayerProps(
     val mask: Boolean = false,
     /** 마스크 적용 여부 (끄면 마스크를 무시하고 레이어 전체가 보임) */
     val maskEnabled: Boolean = true,
+    /** 참조 레이어: 채우기·자동 선택이 "참조 레이어"를 고르면 이 레이어들만 보고 영역을 찾음 (선화 등) */
+    val reference: Boolean = false,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */
