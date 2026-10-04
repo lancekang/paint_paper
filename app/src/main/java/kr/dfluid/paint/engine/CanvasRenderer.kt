@@ -651,6 +651,37 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         notifyLayers()
     }
 
+    /**
+     * 내보내기용: [i]번째 프레임을 어니언 스킨 없이 합성해 돌려줍니다 (GL 스레드에서 콜백).
+     * 화면의 현재 프레임은 그대로 되돌립니다. 프레임 수가 0이면 null.
+     */
+    fun captureFrame(i: Int, callback: (Int, Int, ByteBuffer?) -> Unit) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val f = animFolder(d)
+        if (f == null || f.children.isEmpty()) {
+            callback(d.width, d.height, null)
+            return@post
+        }
+        val keepFrame = animFrame
+        val keepPlaying = animPlaying
+        animFrame = i.coerceIn(0, f.children.size - 1)
+        animPlaying = true
+        belowValid = false
+        markAllDirty()
+        val buf = try {
+            ensureComposite(d)
+            compResult!!.readAll()
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+        animFrame = keepFrame
+        animPlaying = keepPlaying
+        belowValid = false
+        markAllDirty()
+        callback(d.width, d.height, buf)
+    }
+
     fun setOnionSkin(on: Boolean) = post {
         onionSkin = on
         markAllDirty()

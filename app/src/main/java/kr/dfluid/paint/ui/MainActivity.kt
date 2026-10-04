@@ -1681,11 +1681,85 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private fun chooseExport() {
         val png = tips.text("PNG 이미지 (한 장으로 합침)", Action.FILE_EXPORT_PNG)
         val psd = tips.text("PSD (레이어·폴더 유지 · 클립 스튜디오/포토샵)", Action.FILE_EXPORT_PSD)
+        val items = if (animExists && animCount > 0) arrayOf(png, psd, "애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)") else arrayOf(png, psd)
         Ui.dialog(this)
             .setTitle("내보내기")
-            .setItems(arrayOf(png, psd)) { _, which -> if (which == 0) exportPng() else exportPsd() }
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> exportPng()
+                    1 -> exportPsd()
+                    else -> exportGif()
+                }
+            }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    private fun exportGif() {
+        stopPlayback()
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/gif"
+            putExtra(Intent.EXTRA_TITLE, (currentUri?.let { displayName(it)?.substringBeforeLast('.') } ?: "애니메이션") + ".gif")
+        }
+        startActivityForResult(intent, REQ_EXPORT_GIF)
+    }
+
+    /**
+     * 프레임을 하나씩 받아 줄이고(긴 변 최대 GIF_MAX px) GIF에 씁니다.
+     * 렌더러 → (GL 스레드) 픽셀 → io 스레드에서 인코딩 → 다음 프레임 요청 순으로, 한 번에 한 장만 메모리에 둡니다.
+     */
+    private fun writeGif(uri: Uri) {
+        val count = animCount
+        if (count <= 0) return
+        showHud("GIF로 내보내는 중… 0 / $count")
+        val stream = try {
+            contentResolver.openOutputStream(uri, "wt") ?: throw IllegalStateException("파일을 열 수 없습니다.")
+        } catch (e: Exception) {
+            Toast.makeText(this, "GIF로 내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val out = java.io.BufferedOutputStream(stream, 1 shl 16)
+        var encoder: kr.dfluid.paint.document.GifEncoder? = null
+        val delay = maxOf(2, Math.round(100f / settings.animFps))
+        fun fail(msg: String) {
+            try { out.close() } catch (_: Exception) {}
+            ui.post { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+        }
+        fun step(i: Int) {
+            renderer.captureFrame(i) { w, h, buf ->
+                if (buf == null) { fail("메모리가 부족해 GIF로 내보내지 못했습니다."); return@captureFrame }
+                io.execute {
+                    try {
+                        val full = ProjectIO.toBitmap(w, h, buf)
+                        val s = minOf(1f, GIF_MAX.toFloat() / maxOf(w, h))
+                        val gw = maxOf(1, Math.round(w * s))
+                        val gh = maxOf(1, Math.round(h * s))
+                        val small = if (s < 1f) android.graphics.Bitmap.createScaledBitmap(full, gw, gh, true) else full
+                        val px = IntArray(gw * gh)
+                        small.getPixels(px, 0, gw, 0, 0, gw, gh)
+                        if (small !== full) small.recycle()
+                        full.recycle()
+                        val enc = encoder ?: kr.dfluid.paint.document.GifEncoder(out, gw, gh, delay).also { encoder = it }
+                        enc.addFrame(px)
+                        if (i + 1 < count) {
+                            ui.post { showHud("GIF로 내보내는 중… ${i + 1} / $count") }
+                            step(i + 1)
+                        } else {
+                            enc.finish()
+                            out.close()
+                            ui.post { showHud("GIF로 내보냈습니다 (${gw}×$gh · ${count}프레임)") }
+                        }
+                    } catch (e: OutOfMemoryError) {
+                        fail("메모리가 부족해 GIF로 내보내지 못했습니다.")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "gif export failed", e)
+                        fail("GIF로 내보내지 못했습니다: ${e.message}")
+                    }
+                }
+            }
+        }
+        step(0)
     }
 
     private fun exportPsd() {
@@ -1748,6 +1822,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             }
             REQ_EXPORT -> writePng(uri)
             REQ_EXPORT_PSD -> writePsd(uri)
+            REQ_EXPORT_GIF -> writeGif(uri)
         }
     }
 
@@ -1899,6 +1974,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_EXPORT = 12
         private const val REQ_TIP = 13
         private const val REQ_EXPORT_PSD = 14
+        private const val REQ_EXPORT_GIF = 15
+        /** GIF 긴 변 최대 크기 (px) */
+        private const val GIF_MAX = 800
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"
         /** 자동 저장 확인 주기 / 저장 간격 / 이만큼 입력이 없어야 저장 */
         private const val AUTOSAVE_CHECK_MS = 10_000L
