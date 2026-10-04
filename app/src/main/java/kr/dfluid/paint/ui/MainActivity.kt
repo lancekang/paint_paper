@@ -122,6 +122,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var animBar: LinearLayout
     /** 선택 범위 런처: 선택 영역이 있을 때 아래에 뜨는 빠른 동작 */
     private lateinit var selBar: LinearLayout
+    // ---- 내비게이터 ----
+    private lateinit var navPanel: LinearLayout
+    private lateinit var navView: NavigatorView
+    private lateinit var navBtn: ImageView
     // ---- 서브 뷰 ----
     private lateinit var subPanel: LinearLayout
     private lateinit var subImage: RefImageView
@@ -458,6 +462,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
         act(R.drawable.ic_view_flip, "화면 좌우 반전", Action.VIEW_FLIP)
         subBtn = barBtn(R.drawable.ic_subview, "서브 뷰 (참고 이미지 창)") { toggleSubView() }
+        navBtn = barBtn(R.drawable.ic_navigator, "내비게이터 (전체 그림, 눌러서 이동)") { toggleNavigator() }
         group("그리기 보조")
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
@@ -676,6 +681,34 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = Ui.dp(ctx, 16f)
         })
+
+        // ---- 내비게이터 ----
+        val navGrip = FloatingPanels.Grip(ctx, horizontal = true)
+        navView = NavigatorView(ctx, canvasView.viewport).apply {
+            onMoved = { canvasView.pushView() }
+        }
+        navPanel = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(ctx, 6f)
+            setPadding(p, p / 2, p, p)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 10f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            visibility = if (settings.navOpen) View.VISIBLE else View.GONE
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(navGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 36f), Ui.dp(ctx, 22f)))
+                addView(Ui.text(ctx, "내비게이터", 12.5f, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(tips.bind(Ui.iconButton(ctx, R.drawable.ic_view_fit, "화면에 맞춤", 28f, ghost = true) { onShortcut(Action.VIEW_FIT) }, "화면에 맞춤"), Ui.square(ctx, 28f))
+                addView(tips.bind(Ui.iconButton(ctx, R.drawable.ic_close, "닫기", 28f, ghost = true) { toggleNavigator() }, "닫기"), Ui.square(ctx, 28f))
+            })
+            addView(navView, LinearLayout.LayoutParams(Ui.dp(ctx, 220f), Ui.dp(ctx, 170f)).apply { topMargin = Ui.dp(ctx, 4f) })
+        }
+        root.addView(navPanel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        fp.add(navPanel, navGrip, moveY = true, settings.navFx, settings.navFy) { fx, fy ->
+            settings.navFx = fx; settings.navFy = fy; settings.save()
+        }
+        Ui.setOn(navBtn, settings.navOpen)
+        renderer.navigatorOn = settings.navOpen
 
         // ---- 선택 범위 런처 ----
         val sb = LinearLayout(ctx).apply {
@@ -1144,7 +1177,20 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer.redo(); showHud("다시실행")
     }
 
+    override fun onNavigator(bitmap: Bitmap) {
+        if (::navView.isInitialized && settings.navOpen) navView.setImage(bitmap) else bitmap.recycle()
+    }
+
+    private fun toggleNavigator() {
+        settings.navOpen = !settings.navOpen
+        settings.save()
+        navPanel.visibility = if (settings.navOpen) View.VISIBLE else View.GONE
+        Ui.setOn(navBtn, settings.navOpen)
+        renderer.navigatorOn = settings.navOpen
+    }
+
     override fun onViewChanged() {
+        if (::navView.isInitialized && settings.navOpen) navView.invalidate()
         val v = canvasView.viewport
         viewLabel.text = "보기 · ${(v.scale * 100).roundToInt()}% · ${v.rotationDegrees}°${if (v.flipped) " · 반전" else ""}"
         overlay.invalidate()

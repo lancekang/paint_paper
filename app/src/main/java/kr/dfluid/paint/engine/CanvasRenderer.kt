@@ -117,6 +117,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fun onBenchmarkDone(report: String) = Unit
         /** 필터 미리보기가 끝남 (적용·취소·시작 실패 모두) */
         fun onFilterEnded() = Unit
+        /** 내비게이터 축소판 (그림이 바뀌면 최대 0.5초마다) */
+        fun onNavigator(bitmap: Bitmap) = Unit
         /** 애니메이션 상태: 폴더가 있는지, 현재 프레임(0부터), 프레임 수 */
         fun onAnimation(exists: Boolean, frame: Int, count: Int) = Unit
     }
@@ -174,6 +176,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     @Volatile private var animPlaying = false
     /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
     private var borderBufs: Array<RenderTarget>? = null
+    // ---- 내비게이터 ----
+    /** UI가 켜 두면 그림이 바뀔 때 축소판을 보냄 */
+    @Volatile var navigatorOn = false
+        set(v) {
+            field = v
+            if (v) { navSent = -1L; requestRender() }
+        }
+    private var navSent = -1L
+    private var navTime = 0L
+    private var navTarget: RenderTarget? = null
+    private var navScheduled = false
+
     /** 톤 효과 결과 버퍼 (캔버스 크기) */
     private var toneBuf: RenderTarget? = null
     /** 레이어 컬러 결과 버퍼 */
@@ -1729,6 +1743,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         processPicks()
         drawScreen(d)
         processThumbnail()
+        processNavigator(d)
         if (benchPhase != 0) benchFinish(d, benchStart)
         perf.frameEnd()?.let { s ->
             val mem = memoryLine()
@@ -2007,6 +2022,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         smudgeBuf?.release(); smudgeBuf = null
         borderBufs?.forEach { it.release() }; borderBufs = null
         toneBuf?.release(); toneBuf = null
+        navTarget?.release(); navTarget = null
+        navSent = -1L
         colorBuf?.release(); colorBuf = null
         smudgePatch?.release(); smudgePatch = null
         maskEditing = false
@@ -2037,6 +2054,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         smudgePatch = null
         borderBufs = null
         toneBuf = null
+        navTarget = null
+        navSent = -1L
         colorBuf = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
@@ -3379,6 +3398,43 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
+    /** 그림이 바뀌었으면 합성 결과를 축소판으로 (그리는 중이나 0.5초 안에는 미룸) */
+    private fun processNavigator(d: Document) {
+        if (!navigatorOn || navSent == version) return
+        val comp = compResult ?: return
+        val now = SystemClock.uptimeMillis()
+        if (op != null || now - navTime < 500) {
+            if (!navScheduled) {
+                navScheduled = true
+                main.postDelayed({ navScheduled = false; requestRender() }, 520)
+            }
+            return
+        }
+        val s = NAV.toFloat() / max(d.width, d.height)
+        val tw = max(1, (d.width * s).roundToInt())
+        val th = max(1, (d.height * s).roundToInt())
+        var t = navTarget
+        if (t == null || t.width != tw || t.height != th) {
+            t?.release()
+            t = RenderTarget(tw, th)
+            navTarget = t
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, comp.tex)
+        GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+        comp.setFilter(GLES20.GL_LINEAR_MIPMAP_LINEAR, GLES20.GL_LINEAR)
+        t.bind()
+        GlState.noScissor()
+        GlState.off()
+        compositor.drawCopy(comp.tex, 1f)
+        comp.setFilter(GLES20.GL_NEAREST, GLES20.GL_NEAREST)
+        val buf = t.readAll()
+        val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+        bmp.copyPixelsFromBuffer(buf)
+        navSent = version
+        navTime = now
+        main.post { listener.onNavigator(bmp) }
+    }
+
     private fun processThumbnail() {
         if (op != null || thumbQueue.isEmpty()) return
         val d = doc ?: return
@@ -3561,6 +3617,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     companion object {
         private const val TAG = "DFPaint"
         private const val THUMB = 96
+        /** 내비게이터 축소판 긴 변 (px) */
+        private const val NAV = 320
         private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
         /** 퀵 마스크 색 (프리멀티플라이드 빨강) */
         private val QUICK_MASK = floatArrayOf(0.95f, 0.15f, 0.2f, 1f)
