@@ -158,7 +158,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         if (info.props.vector) add("벡터 선 굵기 바꾸기…") { widthDialog(info) }
         add("보이는 그림을 새 레이어로 (병합 복사)") { renderer.mergeVisible(flatten = false) }
         add("그림 통합 (모든 레이어를 하나로)…") {
-            Dialogs.confirm(ctx, "모든 레이어를 보이는 그대로 한 장으로 합칩니다. 숨긴 레이어는 사라집니다 (실행취소 가능).", "통합") {
+            Dialogs.confirm(ctx, "모든 레이어를 보이는 그대로 한 장으로 합칩니다. 숨긴 레이어는 사라지고 밑그림 레이어는 남습니다 (실행취소 가능).", "통합") {
                 renderer.mergeVisible(flatten = true)
             }
         }

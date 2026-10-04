@@ -12,7 +12,13 @@ import java.io.FileDescriptor
  */
 class Mp4Encoder(fd: FileDescriptor, private val w: Int, private val h: Int, private val fps: Int) {
     private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-    private val muxer = MediaMuxer(fd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    private val muxer: MediaMuxer = try {
+        MediaMuxer(fd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    } catch (e: Exception) {
+        // 하드웨어 인코더는 개수가 정해져 있으니 꼭 돌려줌
+        codec.release()
+        throw e
+    }
     private var track = -1
     private var muxing = false
     private var frame = 0L
@@ -76,18 +82,24 @@ class Mp4Encoder(fd: FileDescriptor, private val w: Int, private val h: Int, pri
     }
 
     private fun dequeueInput(): Int {
+        val limit = System.nanoTime() + TIMEOUT_NS
         while (true) {
             val i = codec.dequeueInputBuffer(10_000)
             if (i >= 0) return i
             drain(false)
+            if (System.nanoTime() > limit) throw IllegalStateException("인코더가 응답하지 않습니다.")
         }
     }
 
     private fun drain(end: Boolean) {
+        val limit = System.nanoTime() + TIMEOUT_NS
         while (true) {
             val i = codec.dequeueOutputBuffer(info, if (end) 10_000 else 0)
             when {
-                i == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!end) return
+                i == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (!end) return
+                    if (System.nanoTime() > limit) throw IllegalStateException("인코더가 끝나지 않습니다.")
+                }
                 i == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     track = muxer.addTrack(codec.outputFormat)
                     muxer.start()
@@ -105,5 +117,10 @@ class Mp4Encoder(fd: FileDescriptor, private val w: Int, private val h: Int, pri
                 }
             }
         }
+    }
+
+    private companion object {
+        /** 입력·출력을 기다리는 최대 시간 (멈춘 인코더가 io 스레드를 붙잡지 않게) */
+        const val TIMEOUT_NS = 10_000_000_000L
     }
 }

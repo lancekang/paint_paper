@@ -1111,9 +1111,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun mergeVisible(flatten: Boolean) = post {
         finishOp()
         val d = doc ?: return@post
-        // 어니언 스킨은 빼고 합성 (재생 중처럼)
+        if (flatten && animFolder(d) != null) {
+            // 통합하면 지금 프레임 말고 다른 셀이 모두 사라지므로 막음
+            reportError("애니메이션이 있으면 그림 통합을 할 수 없습니다. 병합 복사를 쓰세요.")
+            return@post
+        }
+        // 어니언 스킨은 빼고 합성 (재생 중처럼), 밑그림 레이어도 빼고
         val keepPlaying = animPlaying
         animPlaying = true
+        hideDrafts = true
         belowValid = false
         markAllDirty()
         val tiles = try {
@@ -1124,14 +1130,22 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return@post
         } finally {
             animPlaying = keepPlaying
+            hideDrafts = false
             belowValid = false
             markAllDirty()
         }
         structural { doc ->
             val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(if (flatten) "통합" else "병합 복사"))
             if (flatten) {
+                // 밑그림 레이어는 합치지 않고 남김 (통합한 레이어 위에)
+                val drafts = doc.allNodes().filter { it.props.draft && generateSequence(it.parent) { p -> p.parent }.none { p -> p.props.draft } }
+                for (x in drafts) x.parent?.children?.remove(x)
                 doc.root.children.clear()
                 insert(doc.root, 0, n)
+                for (x in drafts) {
+                    x.props = x.props.copy(clip = false)
+                    insert(doc.root, doc.root.children.size, x)
+                }
             } else {
                 // 맨 위(루트의 끝)에 넣어야 그 위에 덮이는 레이어가 없음
                 insert(doc.root, doc.root.children.size, n)

@@ -2285,7 +2285,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         if (count <= 0) return
         showHud("MP4로 내보내는 중… 0 / $count")
         val pfd = try {
-            contentResolver.openFileDescriptor(uri, "rw") ?: throw IllegalStateException("파일을 열 수 없습니다.")
+            contentResolver.openFileDescriptor(uri, "rwt") ?: throw IllegalStateException("파일을 열 수 없습니다.")
         } catch (e: Exception) {
             Toast.makeText(this, "MP4로 내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show()
             return
