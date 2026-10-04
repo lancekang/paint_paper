@@ -501,6 +501,28 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
+    /** true면 합성에서 밑그림 레이어를 뺌 (내보내기·채우기 참조용으로 잠깐만) */
+    private var hideDrafts = false
+
+    /** 밑그림을 뺀 합성 결과. 밑그림이 없으면 평소 합성 그대로. 화면용 합성은 다음 프레임에 다시 만듭니다. */
+    private fun cleanComposite(d: Document): ByteBuffer {
+        if (d.allNodes().none { it.props.draft }) {
+            ensureComposite(d)
+            return compResult!!.readAll()
+        }
+        hideDrafts = true
+        belowValid = false
+        markAllDirty()
+        try {
+            ensureComposite(d)
+            return compResult!!.readAll()
+        } finally {
+            hideDrafts = false
+            belowValid = false
+            markAllDirty()
+        }
+    }
+
     private fun referenceImage(d: Document, n: Node, ref: Int): ByteBuffer {
         if (ref == FillOptions.REF_MARKED) {
             // 참조 레이어로 지정한 보이는 레이어들만 아래 → 위로 겹쳐서
@@ -518,10 +540,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             main.post { listener.onRendererError("참조 레이어가 없어 모든 레이어를 보고 찾습니다. 레이어 ⋯ 메뉴에서 지정하세요.") }
         }
-        if (ref != FillOptions.REF_CURRENT) {
-            ensureComposite(d)
-            return compResult!!.readAll()
-        }
+        if (ref != FillOptions.REF_CURRENT) return cleanComposite(d)
         val pv = preview!!
         pv.clear()
         pv.bind()
@@ -824,8 +843,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         belowValid = false
         markAllDirty()
         val buf = try {
-            ensureComposite(d)
-            compResult!!.readAll()
+            cleanComposite(d)
         } catch (e: OutOfMemoryError) {
             null
         }
@@ -1613,8 +1631,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         finishOp()
         val d = doc ?: return@post
         try {
-            ensureComposite(d)
-            callback(d.width, d.height, compResult!!.readAll())
+            callback(d.width, d.height, cleanComposite(d))
         } catch (e: OutOfMemoryError) {
             main.post { listener.onRendererError("메모리가 부족해 내보낼 수 없습니다.") }
         }
@@ -2951,8 +2968,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             var j = i + 1
             while (j < to && nodes[j].isRaster && nodes[j].props.clip) j++
             val p = n.props
-            if (p.visible && p.opacity > 0f) {
-                val clipped = nodes.subList(i + 1, j).filter { it.props.visible && it.props.opacity > 0f }
+            if (p.visible && p.opacity > 0f && !(hideDrafts && p.draft)) {
+                val clipped = nodes.subList(i + 1, j).filter { it.props.visible && it.props.opacity > 0f && !(hideDrafts && it.props.draft) }
                 if (clipped.isEmpty()) {
                     composeNode(n, t, r, depth)
                 } else {
