@@ -87,6 +87,58 @@ object FloodFill {
     }
 
     /**
+     * 덧칠: 펜으로 문지른 자리의 씨앗점([seeds] = x,y 쌍)마다 [run]으로 칸을 찾아 모두 합칩니다.
+     * 이미 칠해진 칸 안의 씨앗과 선(진하고 불투명한 픽셀) 위의 씨앗은 건너뜁니다 (선 전체가 칠해지지 않게).
+     */
+    fun paintOver(
+        ref: ByteBuffer, w: Int, h: Int, seeds: IntArray,
+        tolerance: Int, gap: Int, expand: Int, selection: ByteBuffer?,
+    ): Result? {
+        val px = ref.duplicate()
+        var acc: ByteArray? = null
+        var minX = w; var minY = h; var maxX = -1; var maxY = -1
+        var runs = 0
+        var i = 0
+        while (i + 1 < seeds.size && runs < MAX_PAINT_RUNS) {
+            val x = seeds[i]; val y = seeds[i + 1]
+            i += 2
+            if (x !in 0 until w || y !in 0 until h) continue
+            val k = y * w + x
+            if (acc != null && acc[k].toInt() != 0) continue
+            if (isInk(px, k * 4)) continue
+            val r = run(ref, w, h, x, y, tolerance, gap, expand, selection) ?: continue
+            runs++
+            val a = acc ?: ByteArray(w * h).also { acc = it }
+            val b = r.bounds
+            for (yy in b.y until b.bottom) {
+                val row = yy * w
+                for (xx in b.x until b.right) {
+                    val v = r.mask[row + xx].toInt() and 0xFF
+                    if (v > (a[row + xx].toInt() and 0xFF)) a[row + xx] = v.toByte()
+                }
+            }
+            if (b.x < minX) minX = b.x
+            if (b.y < minY) minY = b.y
+            if (b.right - 1 > maxX) maxX = b.right - 1
+            if (b.bottom - 1 > maxY) maxY = b.bottom - 1
+        }
+        val out = acc ?: return null
+        if (maxX < 0) return null
+        return Result(out, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
+    }
+
+    /** 선으로 볼 픽셀: 반 이상 불투명하고 어두움 (프리멀티플라이드 RGBA) */
+    private fun isInk(px: ByteBuffer, o: Int): Boolean {
+        val a = px.get(o + 3).toInt() and 0xFF
+        if (a < 128) return false
+        val lum = 0.299f * (px.get(o).toInt() and 0xFF) + 0.587f * (px.get(o + 1).toInt() and 0xFF) + 0.114f * (px.get(o + 2).toInt() and 0xFF)
+        return lum / a < 0.35f
+    }
+
+    /** 덧칠 한 번에 찾는 칸의 최대 수 (씨앗마다 캔버스 전체를 훑으므로) */
+    private const val MAX_PAINT_RUNS = 64
+
+    /**
      * 둘러싸고 칠하기: [lasso](w*h, 0 아니면 안쪽) 안에서, 선으로 닫혀 밖과 이어지지 않은 영역을 모두 채웁니다.
      * 선 = 참조 이미지의 "잉크"(흰 바탕에 올렸을 때의 어두움)가 기준보다 진한 곳. 올가미 밖에서 닿을 수 있는 칸은 뺍니다.
      */

@@ -1399,6 +1399,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override val fillEnclose: Boolean get() = settings.fillEnclose
 
+    override val fillPaintOver: Boolean get() = settings.fillPaintOver
+
+    override fun onFillOver(pts: FloatArray) {
+        renderer.fillOver(pts, settings.fillOptions, settings.primaryColor, settings.fillOpacity)
+        settings.pushRecent(settings.primaryColor)
+    }
+
     override fun onFillLasso(pts: FloatArray) {
         renderer.fillEnclosed(pts, settings.fillOptions, settings.primaryColor, settings.fillOpacity)
         settings.pushRecent(settings.primaryColor)

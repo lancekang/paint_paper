@@ -600,6 +600,50 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
+    /** 덧칠: 펜으로 지나간 길([pts] = x,y 쌍, 캔버스 px)에 닿은 칸을 모두 칠합니다. */
+    fun fillOver(pts: FloatArray, opts: FillOptions, color: Int, opacity: Float) = post {
+        val d = doc ?: return@post
+        val n = editableActive() ?: return@post
+        finishOp()
+        if (pts.size < 2) return@post
+        // 4px 간격 씨앗점
+        val seeds = ArrayList<Int>()
+        var px = pts[0]; var py = pts[1]
+        seeds.add(px.toInt()); seeds.add(py.toInt())
+        var i = 2
+        while (i + 1 < pts.size) {
+            val qx = pts[i]; val qy = pts[i + 1]
+            val dist = kotlin.math.hypot(qx - px, qy - py)
+            val steps = (dist / 4f).toInt()
+            for (k in 1..steps) {
+                val t = k / steps.toFloat()
+                seeds.add((px + (qx - px) * t).toInt()); seeds.add((py + (qy - py) * t).toInt())
+            }
+            if (steps > 0) { px = qx; py = qy }
+            i += 2
+        }
+        val ref = referenceImage(d, n, opts.ref)
+        val sel = if (hasSelection) selection?.toBuffer() else null
+        val w = d.width
+        val h = d.height
+        val docRef = d
+        val targetId = n.id
+        val seedArr = seeds.toIntArray()
+        worker.execute {
+            val res = try {
+                FloodFill.paintOver(ref, w, h, seedArr, opts.tolerance, opts.gap, opts.expand, sel)
+            } catch (e: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 채우지 못했습니다.") }
+                return@execute
+            }
+            if (res == null) {
+                main.post { listener.onRendererError("칠할 칸이 없습니다 (선 위만 지나갔거나 선택 영역 밖).") }
+                return@execute
+            }
+            post { labeled("덧칠") { applyFill(docRef, targetId, res, color, opacity) } }
+        }
+    }
+
     /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
     /** true면 합성에서 밑그림 레이어를 뺌 (내보내기·채우기 참조용으로 잠깐만) */
     private var hideDrafts = false

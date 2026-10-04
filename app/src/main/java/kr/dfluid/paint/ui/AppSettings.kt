@@ -28,6 +28,8 @@ class AppSettings(context: Context) {
     var fillExpand = 1
     /** 채우기: false = 누른 곳, true = 둘러싸고 칠하기 */
     var fillEnclose = false
+    /** 채우기 도구 덧칠 모드 (문지른 곳에 닿은 칸을 칠함). fillEnclose보다 먼저 봄 */
+    var fillPaintOver = false
     /** FillOptions.REF_ALL / REF_CURRENT / REF_MARKED */
     var fillRef = FillOptions.REF_ALL
     var fillOpacity = 1f
@@ -128,6 +130,7 @@ class AppSettings(context: Context) {
         fillGap = prefs.getInt("fillGap", 0)
         fillExpand = prefs.getInt("fillExpand", 1)
         fillEnclose = prefs.getBoolean("fillEnclose", false)
+        fillPaintOver = prefs.getBoolean("fillPaintOver", false)
         fillRef = prefs.getInt("fillRef", if (prefs.getBoolean("fillReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         fillOpacity = prefs.getFloat("fillOpacity", 1f)
         wandTolerance = prefs.getInt("wandTolerance", 10)
@@ -217,6 +220,7 @@ class AppSettings(context: Context) {
             .putInt("fillGap", fillGap)
             .putInt("fillExpand", fillExpand)
             .putBoolean("fillEnclose", fillEnclose)
+            .putBoolean("fillPaintOver", fillPaintOver)
             .putInt("fillRef", fillRef)
             .putFloat("fillOpacity", fillOpacity)
             .putInt("wandTolerance", wandTolerance)

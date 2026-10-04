@@ -68,7 +68,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         fun onFillTap(x: Float, y: Float)
         /** 채우기 도구가 둘러싸고 칠하기 모드인지 / 그 올가미가 끝났을 때 */
         val fillEnclose: Boolean
+        val fillPaintOver: Boolean
         fun onFillLasso(pts: FloatArray)
+        fun onFillOver(pts: FloatArray)
         /** 텍스트 도구로 누름 (캔버스 좌표) */
         fun onTextTap(x: Float, y: Float)
         /** 자동 선택 도구로 누름 (캔버스 좌표) */
@@ -89,6 +91,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     private var shapeBrush: Brush? = null
     /** 지금 올가미가 둘러싸고 칠하기용인지 */
     private var fillLasso = false
+    /** fillLasso 중 덧칠 (닫힌 올가미가 아니라 지나간 길) */
+    private var fillOver = false
     private val lassoPts = ArrayList<Float>()
     /** 마지막 도형 계산 결과 (말풍선은 펜을 뗄 때 채우기·선을 따로 확정) */
     private var lastLine = FloatArray(0)
@@ -354,6 +358,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     private fun startPrimary(e: MotionEvent, i: Int, pen: Boolean, h: Host) {
         // 취소된 이전 올가미의 표시가 남지 않게 매번 새로 정함
         fillLasso = false
+        fillOver = false
         primaryId = e.getPointerId(i)
         primaryIsPen = pen
         val x = e.getX(i)
@@ -386,6 +391,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             h.holdMode == HoldMode.EYEDROPPER || tool == Tool.EYEDROPPER || stylusButton -> Mode.PICK
             tool == Tool.MOVE -> Mode.MOVE
             tool == Tool.GRADIENT -> Mode.GRADIENT
+            tool == Tool.FILL && h.fillPaintOver -> {
+                fillLasso = true
+                fillOver = true
+                Mode.SELECT
+            }
             tool == Tool.FILL && h.fillEnclose -> {
                 fillLasso = true
                 Mode.SELECT
@@ -758,7 +768,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 if (fillLasso) {
                     fillLasso = false
                     h.onSelectPreview(selShape, FloatArray(0))
-                    if (!tiny) h.onFillLasso(pts)
+                    if (fillOver) {
+                        fillOver = false
+                        if (pts.size >= 2) h.onFillOver(pts)
+                    } else if (!tiny) h.onFillLasso(pts)
                 } else h.onSelectDone(selShape, pts, tiny)
             }
             Mode.GRADIENT -> {
