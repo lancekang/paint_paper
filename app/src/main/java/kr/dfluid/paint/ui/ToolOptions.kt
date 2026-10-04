@@ -85,6 +85,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
                 view.addView(hint("드래그하면 레이어(선택 영역이 있으면 그 안)를 옮깁니다."), lp())
                 view.addView(Ui.button(ctx, "자유 변형 (Ctrl+T)") { host.startTransform() }, lp(8f))
             }
+            tool == Tool.TEXT -> view.addView(hint("캔버스를 누르면 그 자리에 글을 넣습니다. 텍스트 레이어를 선택한 채 글자 위를 누르면 다시 고칩니다. 색은 주색, 옮기기는 이동 도구. 붓으로 그리려면 레이어 ⋯ → 래스터화."), lp())
             tool == Tool.EYEDROPPER -> view.addView(hint("누른 곳의 색을 주색으로 가져옵니다. Alt를 누르고 있으면 다른 도구에서도 스포이드가 됩니다."), lp())
             tool == Tool.HAND -> view.addView(hint("드래그해 화면을 옮깁니다. Space를 누르고 있어도 됩니다."), lp())
         }

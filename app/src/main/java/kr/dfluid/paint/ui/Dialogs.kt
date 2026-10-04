@@ -432,4 +432,86 @@ object Dialogs {
             .setNegativeButton("취소", null)
             .show()
     }
+
+    /** 텍스트 넣기·고치기. 크기·글꼴·세로쓰기는 다음 새 텍스트의 기본값으로도 기억합니다. 색은 주색(고칠 때는 원래 색 유지). */
+    fun textEditor(ctx: Context, init: kr.dfluid.paint.document.TextSpec, s: AppSettings, onOk: (kr.dfluid.paint.document.TextSpec) -> Unit) {
+        val pad = Ui.dp(ctx, 20f)
+        val editing = init.text.isNotEmpty()
+        var size = init.size
+        var font = init.font
+        var vertical = init.vertical
+        var color = init.color
+        val input = EditText(ctx).apply {
+            setText(init.text)
+            setTextColor(Ui.TEXT)
+            minLines = 3
+            maxLines = 8
+            gravity = Gravity.TOP or Gravity.START
+            hint = "글을 입력하세요 (줄바꿈 가능)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        val sizeRow = Ui.SliderRow(ctx, "크기", 1000)
+        fun sizeToP(v: Float) = (kotlin.math.ln(v / 4f) / kotlin.math.ln(250f) * 1000).roundToInt().coerceIn(0, 1000)
+        fun pToSize(p: Int) = (4f * Math.pow(250.0, p / 1000.0).toFloat()).roundToInt().toFloat()
+        sizeRow.set(sizeToP(size), "${size.roundToInt()}px")
+        sizeRow.onChange = { p -> size = pToSize(p); sizeRow.value.text = "${size.roundToInt()}px" }
+        fun toggle(labels: List<String>, sel: Int, onPick: (Int) -> Unit): LinearLayout {
+            val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            val bs = ArrayList<View>()
+            labels.forEachIndexed { i, l ->
+                val b = Ui.button(ctx, l) {
+                    onPick(i)
+                    bs.forEachIndexed { j, v -> Ui.setOn(v, j == i) }
+                }
+                Ui.setOn(b, i == sel)
+                bs.add(b)
+                row.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 4f) })
+            }
+            return row
+        }
+        val swatch = View(ctx)
+        fun refreshSwatch() {
+            swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Color.GRAY)
+        }
+        refreshSwatch()
+        val colorRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "색", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(swatch, LinearLayout.LayoutParams(Ui.dp(ctx, 32f), Ui.dp(ctx, 26f)))
+            addView(Ui.hspace(ctx, 8f))
+            addView(Ui.button(ctx, "바꾸기…") { colorPicker(ctx, color) { c -> color = c; refreshSwatch() } }, Ui.wrap())
+            if (editing) {
+                addView(Ui.hspace(ctx, 6f))
+                addView(Ui.button(ctx, "주색으로") { color = s.primaryColor; refreshSwatch() }, Ui.wrap())
+            }
+        }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 420f)
+            addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(sizeRow.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 8f) })
+            addView(toggle(kr.dfluid.paint.document.TextSpec.FONT_LABELS, font) { font = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 6f) })
+            addView(toggle(listOf("가로쓰기", "세로쓰기"), if (vertical) 1 else 0) { vertical = it == 1 }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 4f) })
+            addView(colorRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 6f) })
+        }
+        val dlg = Ui.dialog(ctx)
+            .setTitle(if (editing) "텍스트 고치기" else "텍스트 넣기")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ ->
+                val text = input.text.toString().trimEnd()
+                if (text.isBlank()) return@setPositiveButton
+                s.textSize = size; s.textFont = font; s.textVertical = vertical
+                s.save()
+                onOk(init.copy(text = text, size = size, font = font, vertical = vertical, color = color))
+            }
+            .setNegativeButton("취소", null)
+            .create()
+        dlg.setOnShowListener {
+            input.requestFocus()
+            dlg.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        }
+        dlg.show()
+    }
 }

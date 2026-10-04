@@ -132,7 +132,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             "이름 바꾸기",
             if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
             "불투명한 부분을 선택 영역으로",
-        )
+            if (info.props.text != null) "래스터화 (텍스트를 일반 레이어로)" else null,
+        ).filterNotNull().toTypedArray()
         Ui.dialog(ctx)
             .setTitle(info.props.name)
             .setItems(items) { _, which ->
@@ -144,6 +145,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     4 -> rename(info)
                     5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
                     6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
+                    7 -> renderer.rasterizeText(info.id)
                 }
             }
             .setNegativeButton("취소", null)
@@ -269,6 +271,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.blend != BlendMode.NORMAL) append(" · ").append(p.blend.label)
             if (p.alphaLock) append(" · 잠금")
             if (p.reference) append(" · 참조")
+            if (p.text != null) append(" · 텍스트")
             if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }

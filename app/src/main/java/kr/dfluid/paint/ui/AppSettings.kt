@@ -36,6 +36,10 @@ class AppSettings(context: Context) {
     var shapeKind = 1
     /** 사각형·타원: 0 선, 1 채우기, 2 선 + 채우기 */
     var shapeFill = 0
+    /** 새 텍스트의 기본값 */
+    var textSize = 48f
+    var textFont = 0
+    var textVertical = false
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
@@ -89,6 +93,9 @@ class AppSettings(context: Context) {
         selModifyPx = prefs.getInt("selModifyPx", 4)
         shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 3)
         shapeFill = prefs.getInt("shapeFill", 0).coerceIn(0, 2)
+        textSize = prefs.getFloat("textSize", 48f).coerceIn(4f, 1000f)
+        textFont = prefs.getInt("textFont", 0).coerceIn(0, 2)
+        textVertical = prefs.getBoolean("textVertical", false)
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
@@ -145,6 +152,9 @@ class AppSettings(context: Context) {
             .putInt("selModifyPx", selModifyPx)
             .putInt("shapeKind", shapeKind)
             .putInt("shapeFill", shapeFill)
+            .putFloat("textSize", textSize)
+            .putInt("textFont", textFont)
+            .putBoolean("textVertical", textVertical)
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)

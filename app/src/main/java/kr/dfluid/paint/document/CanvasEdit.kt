@@ -43,7 +43,13 @@ sealed class CanvasEdit {
         fun apply(data: DocumentData, e: CanvasEdit): DocumentData {
             val (nw, nh) = e.newSize(data.width, data.height)
             fun conv(t: CpuTiles?): CpuTiles? = t?.let { transform(it, data.width, data.height, nw, nh, e) }
-            val nodes = data.nodes.map { n -> NodeData(n.id, n.kind, n.props, n.parentId, conv(n.tiles), conv(n.maskTiles)) }
+            // 텍스트 레이어: 캔버스 크기 변경(평행이동)은 위치만 옮기고, 그 밖에는 픽셀로 굳힙니다.
+            fun props(p: LayerProps): LayerProps {
+                val t = p.text ?: return p
+                return if (e is Resize) p.copy(text = t.copy(x = t.x + Math.round((nw - data.width) * e.ax), y = t.y + Math.round((nh - data.height) * e.ay)))
+                else p.copy(text = null)
+            }
+            val nodes = data.nodes.map { n -> NodeData(n.id, n.kind, props(n.props), n.parentId, conv(n.tiles), conv(n.maskTiles)) }
             return DocumentData(nw, nh, data.activeId, nodes)
         }
 

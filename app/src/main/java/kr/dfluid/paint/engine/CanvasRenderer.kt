@@ -29,6 +29,7 @@ import kr.dfluid.paint.document.ROOT_ID
 import kr.dfluid.paint.document.SelectionCommand
 import kr.dfluid.paint.document.ShapeEntry
 import kr.dfluid.paint.document.StructureCommand
+import kr.dfluid.paint.document.TextSpec
 import kr.dfluid.paint.document.TilesCommand
 import kr.dfluid.paint.document.TreeShape
 import java.nio.ByteBuffer
@@ -448,7 +449,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectByColor(x: Int, y: Int, opts: FillOptions, selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive()
+        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive(allowText = true)
         if (n == null) return@post
         cancelPreviewOps()
         val ref = referenceImage(d, n, opts.ref)
@@ -554,6 +555,67 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun commitFilter() = post { if (op is Op.Filter) finishOp() }
 
     fun cancelFilter() = post { (op as? Op.Filter)?.let { endFilter(it) } }
+
+    // =====================================================================
+    // UI 스레드 API — 텍스트
+    // =====================================================================
+
+    /** 활성 노드 위에 새 텍스트 레이어. 실행취소 한 단계. */
+    fun createText(spec: TextSpec) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val tiles = spec.render(d.width, d.height)
+        structural { doc ->
+            val a = doc.active
+            val parent = a?.parent ?: doc.root
+            val idx = if (a != null) a.index + 1 else parent.children.size
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(textName(spec), text = spec))
+            insert(parent, idx, n)
+            n.id
+        }
+        // structural이 새 surface를 만들었으면 픽셀을 채움 (실행취소하면 StructureCommand가 보관·복원)
+        val id = d.activeId
+        val s = surfaces[id] ?: return@post
+        if (d.find(id)?.props?.text != spec) return@post
+        tiles.forEach { (k, b) -> s.write(k, b) }
+        thumbQueue.add(id)
+        belowValid = false
+        markAllDirty()
+    }
+
+    /** 텍스트 레이어 [id]의 내용을 [spec]으로 바꿉니다 (픽셀 + 속성을 한 번의 실행취소로). */
+    fun updateText(id: Int, spec: TextSpec) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = d.find(id)?.takeIf { it.isRaster && it.props.text != null } ?: return@post
+        val s = surfaces[id] ?: return@post
+        val tiles = spec.render(d.width, d.height)
+        val saved = HashMap<Int, ByteBuffer?>()
+        for (k in s.tiles.keys.toList() + tiles.keys) if (k !in saved) saved[k] = s.read(k)
+        for (k in saved.keys) s.write(k, tiles[k])
+        val before = d.shape()
+        val name = if (n.props.name == textName(n.props.text!!)) textName(spec) else n.props.name
+        n.props = n.props.copy(text = spec, name = name)
+        history.push(CompoundCommand(listOf(TilesCommand(id, saved), StructureCommand(before, d.shape(), d.activeId, d.activeId))))
+        thumbQueue.add(id)
+        afterEdit()
+    }
+
+    /** 텍스트 레이어를 일반 레이어로 (픽셀은 그대로, 더는 텍스트로 고칠 수 없음). */
+    fun rasterizeText(id: Int) = post {
+        val d = doc ?: return@post
+        val n = d.find(id)?.takeIf { it.props.text != null } ?: return@post
+        finishOp()
+        val before = d.shape()
+        n.props = n.props.copy(text = null)
+        history.push(StructureCommand(before, d.shape(), d.activeId, d.activeId))
+        afterEdit()
+    }
+
+    private fun textName(spec: TextSpec): String {
+        val first = spec.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: ""
+        return "T " + if (first.length > 12) first.take(12) + "…" else first
+    }
 
     // =====================================================================
     // UI 스레드 API — 캔버스 편집 (크기·회전·반전)
@@ -678,7 +740,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectFromLayer(selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = editableActive() ?: return@post
+        val n = editableActive(allowText = true) ?: return@post
         cancelPreviewOps()
         val rgba = referenceImage(d, n, FillOptions.REF_CURRENT)
         val alpha = ByteArray(d.width * d.height)
@@ -992,6 +1054,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val pixels = TilesCommand(below.id, saved)
         val before = d.shape()
         val activeBefore = d.activeId
+        if (below.props.text != null) below.props = below.props.copy(text = null)
         parent!!.children.removeAt(a.index)
         val after = d.shape()
         val struct = StructureCommand(before, after, activeBefore, below.id)
@@ -1505,11 +1568,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // 진행 중 작업 (미리보기 → 확정)
     // =====================================================================
 
-    private fun editableActive(): Node? {
+    /** [allowText] = false면 텍스트 레이어도 거부합니다 (붓질·채우기·필터 등 픽셀을 직접 고치는 작업). */
+    private fun editableActive(allowText: Boolean = false): Node? {
         val d = doc ?: return null
         val n = d.active
         if (n == null || !n.isRaster) {
             reportError("폴더가 아닌 레이어를 선택하세요.")
+            return null
+        }
+        if (!allowText && n.props.text != null) {
+            reportError("텍스트 레이어입니다. 텍스트 도구로 고치거나, 레이어 ⋯ 메뉴에서 래스터화한 뒤 그리세요.")
             return null
         }
         return n
@@ -1639,7 +1707,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     private fun beginTransformGl() {
         val d = doc ?: return
-        val n = editableActive() ?: return
+        val n = editableActive(allowText = true) ?: return
         if (op is Op.Transform) return
         finishOp()
         val s = surfaces[editId(n)]!!
@@ -1744,6 +1812,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val ms2 = placeFloating(ms, mf, mb, o.maskMatrix()!!, o.whole, d)
             if (ms2.isNotEmpty()) parts.add(TilesCommand(-n.id, ms2))
             thumbQueue.add(-n.id)
+        }
+        // 텍스트 레이어: 평행이동만이면 위치를 옮기고, 회전·확대 등이면 픽셀로 굳힘
+        n.props.text?.let { t ->
+            val before = d.shape()
+            val m = o.m
+            val pure = !hasSelection && !isMaskEdit(n) && m[0] == 1f && m[1] == 0f && m[2] == 0f && m[3] == 1f
+            n.props = n.props.copy(text = if (pure) t.copy(x = t.x + m[4] - o.bounds.x, y = t.y + m[5] - o.bounds.y) else null)
+            parts.add(StructureCommand(before, d.shape(), n.id, n.id))
+            notifyLayers()
         }
         if (hasSelection) {
             val before = selEncoded

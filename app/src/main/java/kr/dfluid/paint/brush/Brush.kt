@@ -17,6 +17,7 @@ enum class Tool(val label: String, val short: String, val isBrush: Boolean) {
     MOVE("이동", "이동", false),
     FILL("채우기", "채우기", false),
     GRADIENT("그라데이션", "그라데", false),
+    TEXT("텍스트", "텍스트", false),
     EYEDROPPER("스포이드", "스포이드", false),
     HAND("손바닥", "손", false),
 }

@@ -41,6 +41,8 @@ data class LayerProps(
     val maskEnabled: Boolean = true,
     /** 참조 레이어: 채우기·자동 선택이 "참조 레이어"를 고르면 이 레이어들만 보고 영역을 찾음 (선화 등) */
     val reference: Boolean = false,
+    /** 텍스트 레이어면 그 내용 (픽셀은 이 값으로 그린 결과). null = 일반 래스터 */
+    val text: TextSpec? = null,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

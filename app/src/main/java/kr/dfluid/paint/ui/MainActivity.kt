@@ -466,7 +466,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val groups = listOf(
             listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER, Tool.BLEND),
             listOf(Tool.SELECT, Tool.MOVE),
-            listOf(Tool.FILL, Tool.GRADIENT, Tool.SHAPE),
+            listOf(Tool.FILL, Tool.GRADIENT, Tool.SHAPE, Tool.TEXT),
             listOf(Tool.EYEDROPPER, Tool.HAND),
         )
         groups.forEachIndexed { gi, list ->
@@ -828,6 +828,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.ERASER -> R.drawable.ic_tool_eraser
         Tool.BLEND -> R.drawable.ic_tool_blend
         Tool.SHAPE -> R.drawable.ic_tool_shape
+        Tool.TEXT -> R.drawable.ic_tool_text
         Tool.SELECT -> R.drawable.ic_tool_select
         Tool.MOVE -> R.drawable.ic_tool_move
         Tool.FILL -> R.drawable.ic_tool_fill
@@ -844,6 +845,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.ERASER -> Action.TOOL_ERASER
         Tool.BLEND -> Action.TOOL_BLEND
         Tool.SHAPE -> Action.TOOL_SHAPE
+        Tool.TEXT -> Action.TOOL_TEXT
         Tool.SELECT -> Action.TOOL_SELECT
         Tool.MOVE -> Action.TOOL_MOVE
         Tool.FILL -> Action.TOOL_FILL
@@ -919,6 +921,24 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             else -> settings.selectMode
         }
         renderer.selectByColor(x.toInt(), y.toInt(), settings.wandOptions, op)
+    }
+
+    /** 활성 레이어가 텍스트이고 그 글 상자 안을 누르면 고치기, 아니면 그 자리에 새 텍스트. */
+    override fun onTextTap(x: Float, y: Float) {
+        val active = lastNodes.firstOrNull { it.id == lastActiveId }
+        val t = active?.props?.text
+        if (active != null && t != null) {
+            val b = t.bounds()
+            val slop = 12f / canvasView.viewport.scale
+            if (x >= b.left - slop && x <= b.right + slop && y >= b.top - slop && y <= b.bottom + slop) {
+                Dialogs.textEditor(this, t, settings) { spec -> renderer.updateText(active.id, spec) }
+                return
+            }
+        }
+        val init = kr.dfluid.paint.document.TextSpec(
+            "", x, y, settings.textSize, settings.primaryColor, settings.textFont, settings.textVertical,
+        )
+        Dialogs.textEditor(this, init, settings) { spec -> renderer.createText(spec) }
     }
 
     override fun onFillTap(x: Float, y: Float) {
@@ -1388,6 +1408,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.TOOL_ERASER -> Tool.ERASER
             Action.TOOL_BLEND -> Tool.BLEND
             Action.TOOL_SHAPE -> Tool.SHAPE
+            Action.TOOL_TEXT -> Tool.TEXT
             Action.TOOL_EYEDROPPER -> Tool.EYEDROPPER
             Action.TOOL_HAND -> Tool.HAND
             Action.TOOL_SELECT -> Tool.SELECT

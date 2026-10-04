@@ -11,3 +11,4 @@ captures/
 /build_*.txt
 /install*.txt
 **/build_sym.txt
+backup_tablet/

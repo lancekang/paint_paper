@@ -60,6 +60,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         /** tiny = 거의 움직이지 않은 탭 (선택 해제로 처리) */
         fun onSelectDone(shape: SelShape, pts: FloatArray, tiny: Boolean)
         fun onFillTap(x: Float, y: Float)
+        /** 텍스트 도구로 누름 (캔버스 좌표) */
+        fun onTextTap(x: Float, y: Float)
         /** 자동 선택 도구로 누름 (캔버스 좌표) */
         fun onWandTap(x: Float, y: Float)
         /** phase 0 = 진행, 1 = 확정, 2 = 취소 */
@@ -351,6 +353,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             tool == Tool.GRADIENT -> Mode.GRADIENT
             tool == Tool.FILL -> {
                 h.onFillTap(downCx, downCy)
+                Mode.IGNORE
+            }
+            tool == Tool.TEXT -> {
+                h.onTextTap(downCx, downCy)
                 Mode.IGNORE
             }
             tool == Tool.SHAPE && e.getToolType(i) != MotionEvent.TOOL_TYPE_ERASER -> Mode.SHAPE
