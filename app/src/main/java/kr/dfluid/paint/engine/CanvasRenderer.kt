@@ -497,7 +497,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectByColor(x: Int, y: Int, opts: FillOptions, selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive(allowText = true, allowVector = true)
+        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive(allowText = true, allowVector = true, allowLocked = true)
         if (n == null) return@post
         cancelPreviewOps()
         val ref = referenceImage(d, n, opts.ref)
@@ -618,7 +618,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun copySelection(cut: Boolean) = post {
         finishOp()
         val d = doc ?: return@post
-        val n = editableActive(allowText = !cut, allowVector = !cut) ?: return@post
+        val n = editableActive(allowText = !cut, allowVector = !cut, allowLocked = !cut) ?: return@post
         val s = surfaces[editId(n)] ?: return@post
         val area = (if (hasSelection) selBounds else s.tileBounds()?.let { contentBounds(s, it) }) ?: run {
             reportError("복사할 픽셀이 없습니다.")
@@ -1035,7 +1035,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectFromLayer(selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = editableActive(allowText = true, allowVector = true) ?: return@post
+        val n = editableActive(allowText = true, allowVector = true, allowLocked = true) ?: return@post
         cancelPreviewOps()
         val rgba = referenceImage(d, n, FillOptions.REF_CURRENT)
         val alpha = ByteArray(d.width * d.height)
@@ -1982,11 +1982,26 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // =====================================================================
 
     /** [allowText] = false면 텍스트 레이어도 거부합니다 (붓질·채우기·필터 등 픽셀을 직접 고치는 작업). */
-    private fun editableActive(allowText: Boolean = false, allowVector: Boolean = false): Node? {
+    /** 잠긴 폴더 안에 있는지 */
+    private fun lockedByFolder(n: Node): Boolean {
+        var p = n.parent
+        while (p != null && p.id != ROOT_ID) {
+            if (p.props.locked) return true
+            p = p.parent
+        }
+        return false
+    }
+
+    /** [allowLocked] = 읽기만 하는 작업(복사·선택)이면 잠긴 레이어도 허용 */
+    private fun editableActive(allowText: Boolean = false, allowVector: Boolean = false, allowLocked: Boolean = false): Node? {
         val d = doc ?: return null
         val n = d.active
         if (n == null || !n.isRaster) {
             reportError("폴더가 아닌 레이어를 선택하세요.")
+            return null
+        }
+        if (!allowLocked && (n.props.locked || lockedByFolder(n))) {
+            reportError("잠긴 레이어입니다. 레이어 ⋯ 메뉴에서 잠금을 푸세요.")
             return null
         }
         if (!allowText && n.props.text != null) {

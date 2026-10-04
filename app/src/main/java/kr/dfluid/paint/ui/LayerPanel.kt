@@ -138,6 +138,9 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         add(if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)") {
             renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
         }
+        add(if (info.props.locked) "잠금 풀기" else "레이어 잠금 (편집 막기)") {
+            renderer.setProps(info.id, info.props.copy(locked = !info.props.locked), record = true)
+        }
         add("불투명한 부분을 선택 영역으로") { renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE) }
         if (raster) {
             add(if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") { borderDialog(info) }
@@ -466,6 +469,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.text != null) append(" · 텍스트")
             if (p.vector) append(" · 벡터")
             if (p.animation) append(" · 애니메이션")
+            if (p.locked) append(" · 잠김")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
             if (p.layerColorOn) append(" · 레이어 컬러")
