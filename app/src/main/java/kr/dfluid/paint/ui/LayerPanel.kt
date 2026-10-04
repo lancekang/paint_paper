@@ -126,38 +126,32 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     /** 자주 쓰지 않는 레이어 동작. */
     private fun moreMenu() {
         val info = active ?: return
-        val items = arrayOf(
-            "위로 이동", "아래로 이동",
-            tips.text("레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR),
-            tips.text("폴더로 묶기", Action.LAYER_GROUP),
-            "이름 바꾸기",
-            if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
-            "불투명한 부분을 선택 영역으로",
-            if (info.kind == NodeKind.RASTER) (if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") else null,
-            if (info.kind == NodeKind.RASTER) (if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") else null,
-            if (info.kind == NodeKind.RASTER) (if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") else null,
-            if (info.props.text != null || info.props.vector) "래스터화 (일반 레이어로)" else null,
-        ).filterNotNull().toTypedArray()
+        val raster = info.kind == NodeKind.RASTER
+        // (항목, 동작) 쌍: 레이어 종류에 따라 항목이 빠져도 번호가 어긋나지 않게
+        val entries = ArrayList<Pair<String, () -> Unit>>()
+        fun add(label: String, f: () -> Unit) = entries.add(label to f)
+        add("위로 이동") { renderer.moveNode(+1) }
+        add("아래로 이동") { renderer.moveNode(-1) }
+        add(tips.text("레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR)) { renderer.clearLayer() }
+        add(tips.text("폴더로 묶기", Action.LAYER_GROUP)) { renderer.groupActive() }
+        add("이름 바꾸기") { rename(info) }
+        add(if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)") {
+            renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
+        }
+        add("불투명한 부분을 선택 영역으로") { renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE) }
+        if (raster) {
+            add(if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") { borderDialog(info) }
+            add(if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") { toneDialog(info) }
+            add(if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") {
+                if (info.props.layerColorOn) renderer.setProps(info.id, info.props.copy(layerColorOn = false), record = true)
+                else layerColorDialog(info)
+            }
+        }
+        if (info.props.vector) add("벡터 선 굵기 바꾸기…") { widthDialog(info) }
+        if (info.props.text != null || info.props.vector) add("래스터화 (일반 레이어로)") { renderer.rasterizeText(info.id) }
         Ui.dialog(ctx)
             .setTitle(info.props.name)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> renderer.moveNode(+1)
-                    1 -> renderer.moveNode(-1)
-                    2 -> renderer.clearLayer()
-                    3 -> renderer.groupActive()
-                    4 -> rename(info)
-                    5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
-                    6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
-                    7 -> if (info.kind == NodeKind.RASTER) borderDialog(info) else Unit
-                    8 -> if (info.kind == NodeKind.RASTER) toneDialog(info) else Unit
-                    9 -> if (info.kind == NodeKind.RASTER) {
-                        if (info.props.layerColorOn) renderer.setProps(info.id, info.props.copy(layerColorOn = false), record = true)
-                        else layerColorDialog(info)
-                    }
-                    10 -> renderer.rasterizeText(info.id)
-                }
-            }
+            .setItems(entries.map { it.first }.toTypedArray()) { _, which -> entries.getOrNull(which)?.second?.invoke() }
             .setNegativeButton("취소", null)
             .show()
     }
@@ -219,6 +213,28 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         }
         dlg.show()
         preview(false)
+    }
+
+    /** 벡터 레이어의 모든 선 굵기를 배율로 바꿉니다. */
+    private fun widthDialog(info: NodeInfo) {
+        var pct = 100
+        val pad = Ui.dp(ctx, 20f)
+        val row = Ui.SliderRow(ctx, "배율", 275)
+        row.set(pct - 25, "$pct%")
+        row.onChange = { p -> pct = p + 25; row.set(p, "$pct%") }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 360f)
+            addView(row.view)
+            addView(Ui.text(ctx, "이 벡터 레이어의 모든 선을 같은 비율로 굵게·가늘게 합니다.", 11.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(ctx, 8f), 0, 0) })
+        }
+        Ui.dialog(ctx)
+            .setTitle("선 굵기 · ${info.props.name}")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ -> if (pct != 100) renderer.scaleVectorWidth(info.id, pct / 100f) }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     /** 레이어 컬러: 미리 정한 색 몇 가지 + 색 지정. 고르면 바로 켜짐 (실행취소 한 단계). */

@@ -81,6 +81,17 @@ class VStroke(val stamps: FloatArray, val brush: Brush, val color: Int, val fill
         return VStroke(out, brush, color, f)
     }
 
+    /** 선 굵기만 [factor]배 (위치는 그대로) */
+    fun widthScaled(factor: Float): VStroke {
+        val out = stamps.copyOf()
+        var i = 0
+        while (i + 2 < out.size) {
+            out[i + 2] = stamps[i + 2] * factor
+            i += StrokeBuilder.FLOATS
+        }
+        return VStroke(out, brush, color, fill)
+    }
+
     companion object {
         /** 벡터 레이어 저장 형식: [개수] 다음 선마다 (브러시 JSON, 색, 스탬프 수·값, 채우기 수·값). */
         fun encode(list: List<VStroke>): ByteArray {

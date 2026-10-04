@@ -2184,6 +2184,28 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     // ---- 벡터 ----
 
+    /** 벡터 레이어 [id]의 모든 선 굵기를 [factor]배로 (실행취소 한 단계). */
+    fun scaleVectorWidth(id: Int, factor: Float) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = d.find(id)?.takeIf { it.props.vector } ?: return@post
+        val s = surfaces[n.id] ?: return@post
+        val old = vectors[n.id] ?: return@post
+        if (old.isEmpty()) return@post
+        val now = old.map { it.widthScaled(factor) }
+        vectors[n.id] = now
+        val saved = HashMap<Int, ByteBuffer?>()
+        var area: IRect? = null
+        for (v in old + now) {
+            val b = v.bounds
+            IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height)?.let { area = it.union(area) }
+        }
+        area?.let { rasterStrokes(d, s, it, now, saved) }
+        history.push(CompoundCommand(listOf(TilesCommand(n.id, saved), VectorCommand(n.id, old, now))))
+        thumbQueue.add(n.id)
+        afterEdit()
+    }
+
     /** 지우개 스탬프에 닿은 선을 지우고, 그 선들이 있던 영역을 남은 선으로 다시 그립니다. */
     private fun vectorErase(o: Op.VErase, stamps: FloatArray) {
         val d = doc ?: return
