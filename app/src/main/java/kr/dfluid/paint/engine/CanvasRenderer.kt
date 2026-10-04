@@ -85,6 +85,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fun onBenchmarkDone(report: String) = Unit
         /** 필터 미리보기가 끝남 (적용·취소·시작 실패 모두) */
         fun onFilterEnded() = Unit
+        /** 애니메이션 상태: 폴더가 있는지, 현재 프레임(0부터), 프레임 수 */
+        fun onAnimation(exists: Boolean, frame: Int, count: Int) = Unit
     }
 
     /** CanvasView가 설정합니다. */
@@ -127,6 +129,14 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var smudgeBuf: RenderTarget? = null
     /** 벡터 레이어의 선 목록 (레이어 id → 선). 레이어를 지워도 실행취소용으로 남겨 둡니다 */
     private val vectors = HashMap<Int, List<VStroke>>()
+
+    // ---- 애니메이션 ----
+    /** 현재 프레임 (애니메이션 폴더의 자식 번호, 0 = 맨 아래 자식) */
+    @Volatile private var animFrame = 0
+    /** 어니언 스킨 (앞뒤 프레임을 빨강·파랑으로 비춰 보기). 재생 중에는 끔 */
+    @Volatile var onionSkin = true
+        private set
+    @Volatile private var animPlaying = false
     /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
     private var borderBufs: Array<RenderTarget>? = null
     /** 톤 효과 결과 버퍼 (캔버스 크기) */
@@ -591,6 +601,132 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun commitFilter() = post { if (op is Op.Filter) finishOp() }
 
     fun cancelFilter() = post { (op as? Op.Filter)?.let { endFilter(it) } }
+
+    // =====================================================================
+    // UI 스레드 API — 애니메이션
+    // =====================================================================
+
+    /** 문서의 애니메이션 폴더 (첫 번째 하나만 씁니다). */
+    private fun animFolder(d: Document): Node? = d.allNodes().firstOrNull { it.isFolder && it.props.animation }
+
+    /** 애니메이션 폴더를 만듭니다 (맨 위, 빈 프레임 1장). 이미 있으면 그 첫 프레임으로. */
+    fun createAnimation() = post {
+        finishOp()
+        val d = doc ?: return@post
+        if (animFolder(d) != null) {
+            setFrameGl(d, 0)
+            return@post
+        }
+        structural { doc ->
+            val f = Node(doc.newId(), NodeKind.FOLDER, LayerProps("애니메이션", blend = BlendMode.PASS_THROUGH, animation = true))
+            insert(doc.root, doc.root.children.size, f)
+            val cel = Node(doc.newId(), NodeKind.RASTER, LayerProps("1"))
+            insert(f, 0, cel)
+            cel.id
+        }
+        animFrame = 0
+        notifyLayers()
+    }
+
+    /** [i]번째 프레임으로 (그 셀을 활성 레이어로). playing = 재생 중이면 어니언 스킨을 그리지 않음. */
+    fun setFrame(i: Int, playing: Boolean = false) = post {
+        val d = doc ?: return@post
+        animPlaying = playing
+        setFrameGl(d, i)
+    }
+
+    private fun setFrameGl(d: Document, i: Int) {
+        val f = animFolder(d) ?: return
+        if (f.children.isEmpty()) return
+        val idx = Math.floorMod(i, f.children.size)
+        if (op != null) finishOp()
+        animFrame = idx
+        val cel = f.children[idx]
+        if (d.activeId != cel.id) {
+            d.activeId = cel.id
+            maskEditing = false
+        }
+        belowValid = false
+        markAllDirty()
+        notifyLayers()
+    }
+
+    fun setOnionSkin(on: Boolean) = post {
+        onionSkin = on
+        markAllDirty()
+    }
+
+    /** 현재 프레임 다음에 새 프레임 ([duplicate]면 현재 셀 복제). */
+    fun addFrame(duplicate: Boolean) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val f = animFolder(d) ?: return@post
+        val at = (animFrame + 1).coerceAtMost(f.children.size)
+        structural { doc ->
+            val src = f.children.getOrNull(animFrame)
+            val n = if (duplicate && src != null) cloneSubtree(doc, src, "${at + 1}")
+            else Node(doc.newId(), NodeKind.RASTER, LayerProps("${at + 1}"))
+            insert(f, at, n)
+            n.id
+        }
+        animFrame = at
+        animFolder(d)?.let { renameFrames(d, it) } // structural이 트리를 다시 만들었을 수 있음
+        setFrameGl(d, at)
+    }
+
+    /** 현재 프레임 삭제 (한 장은 남김). */
+    fun deleteFrame() = post {
+        finishOp()
+        val d = doc ?: return@post
+        val f = animFolder(d) ?: return@post
+        if (f.children.size <= 1) {
+            reportError("프레임이 한 장은 있어야 합니다.")
+            return@post
+        }
+        val idx = animFrame.coerceIn(0, f.children.size - 1)
+        structural { _ ->
+            f.children.removeAt(idx)
+            f.children[(idx - 1).coerceAtLeast(0)].id
+        }
+        animFrame = (idx - 1).coerceAtLeast(0)
+        animFolder(d)?.let { renameFrames(d, it) }
+        setFrameGl(d, animFrame)
+    }
+
+    /** 프레임 이름이 숫자뿐이면 순서대로 다시 매김 (사용자가 바꾼 이름은 그대로). */
+    private fun renameFrames(d: Document, f: Node) {
+        var changed = false
+        f.children.forEachIndexed { i, c ->
+            val want = "${i + 1}"
+            if (c.props.name != want && c.props.name.all { it.isDigit() }) {
+                c.props = c.props.copy(name = want)
+                changed = true
+            }
+        }
+        if (changed) notifyLayers()
+    }
+
+    /** 애니메이션 폴더: 현재 프레임 셀만, 어니언 스킨이면 앞(빨강)·뒤(파랑) 셀을 옅게 먼저. */
+    private fun composeAnim(n: Node, t: PingPong, r: IRect, depth: Int) {
+        val kids = n.children
+        if (kids.isEmpty()) return
+        val f = animFrame.coerceIn(0, kids.size - 1)
+        val g = pairAt(depth + 1)
+        g.cur.clear(r)
+        if (onionSkin && !animPlaying) {
+            kids.getOrNull(f - 1)?.let { drawOnion(it, g, r, ONION_PREV) }
+            kids.getOrNull(f + 1)?.let { drawOnion(it, g, r, ONION_NEXT) }
+        }
+        composeChildren(kids, f, f + 1, g, r, depth + 1)
+        drawSource(Src.Tex(g.cur), t, normalBlend(n), n.props.opacity, false, r)
+    }
+
+    private fun drawOnion(cel: Node, g: PingPong, r: IRect, color: Int) {
+        if (!cel.isRaster || !cel.props.visible) return
+        val src = maskedSrc(cel, r)
+        val tinted = colorizeSrc(cel, src, r, color)
+        drawSource(tinted, g, BlendMode.NORMAL, 0.35f, false, r)
+    }
 
     // =====================================================================
     // UI 스레드 API — 텍스트
@@ -1610,6 +1746,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         surfaces.putAll(newSurfaces)
         vectors.clear()
         for (n in data.nodes) n.vector?.let { vectors[n.id] = it }
+        animFrame = 0
+        animPlaying = false
         d.rebuild(data.nodes.map { ShapeEntry(it.id, it.kind, it.props, it.parentId) })
         d.activeId = if (d.find(data.activeId) != null) data.activeId else d.allNodes().firstOrNull { it.isRaster }?.id ?: 0
         strokeBuf = sb; selTex = sel; preview = pv; belowCache = below
@@ -2603,6 +2741,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     private fun composeNode(n: Node, t: PingPong, r: IRect, depth: Int) {
+        if (n.isFolder && n.props.animation) {
+            composeAnim(n, t, r, depth)
+            return
+        }
         if (n.isRaster) {
             drawSource(layerSrc(n, r), t, n.props.blend, n.props.opacity, false, r)
             return
@@ -2637,7 +2779,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 레이어 컬러 적용 소스 ([r] 영역). 결과는 toneBuf가 아닌 별도 버퍼(borderBufs[0] 재사용 불가 → colorBuf). */
-    private fun colorizeSrc(n: Node, src: Src, r: IRect): Src {
+    private fun colorizeSrc(n: Node, src: Src, r: IRect, color: Int = n.props.layerColor): Src {
         val d = doc!!
         val b = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
         val srcTex = when (src) {
@@ -2656,7 +2798,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         out.bind()
         GlState.scissor(r)
         GlState.off()
-        compositor.drawColorize(srcTex.tex, n.props.layerColor)
+        compositor.drawColorize(srcTex.tex, color)
         GlState.noScissor()
         return Src.Tex(out)
     }
@@ -3151,6 +3293,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val active = d.activeId
         val ids = d.rasterIds()
         main.post { listener.onLayersChanged(list, active, ids) }
+        val af = animFolder(d)
+        val count = af?.children?.size ?: 0
+        if (af != null && count > 0) animFrame = animFrame.coerceIn(0, count - 1)
+        val frame = animFrame
+        main.post { listener.onAnimation(af != null, frame, count) }
     }
 
     private fun notifyHistory() {
@@ -3165,6 +3312,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
         /** 퀵 마스크 색 (프리멀티플라이드 빨강) */
         private val QUICK_MASK = floatArrayOf(0.95f, 0.15f, 0.2f, 1f)
+        /** 어니언 스킨 색: 앞 프레임 빨강, 뒤 프레임 파랑 */
+        private const val ONION_PREV = 0xFFE53935.toInt()
+        private const val ONION_NEXT = 0xFF1E88E5.toInt()
 
         /** sRGB 색 + 알파 → 프리멀티플라이드 float4 */
         fun premul(color: Int, alpha: Float): FloatArray = floatArrayOf(

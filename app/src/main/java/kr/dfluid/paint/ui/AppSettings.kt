@@ -40,6 +40,8 @@ class AppSettings(context: Context) {
     var textSize = 48f
     var textFont = 0
     var textVertical = false
+    /** 애니메이션 재생 속도 */
+    var animFps = 12
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
@@ -107,6 +109,7 @@ class AppSettings(context: Context) {
         textSize = prefs.getFloat("textSize", 48f).coerceIn(4f, 1000f)
         textFont = prefs.getInt("textFont", 0).coerceIn(0, 2)
         textVertical = prefs.getBoolean("textVertical", false)
+        animFps = prefs.getInt("animFps", 12)
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
@@ -172,6 +175,7 @@ class AppSettings(context: Context) {
             .putFloat("textSize", textSize)
             .putInt("textFont", textFont)
             .putBoolean("textVertical", textVertical)
+            .putInt("animFps", animFps)
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)

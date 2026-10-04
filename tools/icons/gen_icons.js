@@ -57,6 +57,14 @@ const icons = {
     { d: circle(21, 13, 0.9), fill: true },
   ],
   tool_marker: ['M9,11l-6,6v3h9l3,-3', 'M22,12l-4.6,4.6a2,2 0 0,1 -2.8,0l-5.2,-5.2a2,2 0 0,1 0,-2.8L14,4'],
+  // 애니메이션: 필름
+  film: [rect(3, 4, 18, 16, 2), 'M7,4v16M17,4v16M3,9h4M3,15h4M17,9h4M17,15h4'],
+  play: [{ d: 'M8,5v14l11,-7Z', fill: true }],
+  pause: [{ d: rect(6, 5, 4, 14, 1), fill: true }, { d: rect(14, 5, 4, 14, 1), fill: true }],
+  frame_prev: ['M6,5v14', { d: 'M19,5v14l-10,-7Z', fill: true }],
+  frame_next: ['M18,5v14', { d: 'M5,5v14l10,-7Z', fill: true }],
+  // 어니언 스킨: 겹친 원 세 개
+  onion: [circle(8, 12, 5), circle(12, 12, 5), circle(16, 12, 5)],
   // 새 벡터 레이어: 곡선 + 제어점 + 더하기
   vector_add: ['M3,17C7,5 11,5 14,12', rect(1.5, 15.5, 3, 3), rect(12.5, 10.5, 3, 3), 'M19,14v6M16,17h6'],
   // 텍스트: T

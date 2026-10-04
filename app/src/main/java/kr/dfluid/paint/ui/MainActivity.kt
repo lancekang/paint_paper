@@ -115,6 +115,26 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var toolBar: View
     private lateinit var rightPanel: View
     private lateinit var transformBar: View
+    // ---- 애니메이션 타임라인 ----
+    private lateinit var animBar: LinearLayout
+    private lateinit var frameStrip: LinearLayout
+    private lateinit var frameLabel: TextView
+    private lateinit var playBtn: ImageView
+    private lateinit var onionBtn: ImageView
+    private lateinit var animBtn: ImageView
+    private var animExists = false
+    private var animFrame = 0
+    private var animCount = 0
+    private var animPlaying = false
+    /** 타임라인을 보이게 할지 (애니메이션 폴더가 있을 때) */
+    private var timelineOpen = true
+    private val playTick = object : Runnable {
+        override fun run() {
+            if (!animPlaying || animCount <= 0) return
+            renderer.setFrame(animFrame + 1, playing = true)
+            ui.postDelayed(this, (1000f / settings.animFps).toLong())
+        }
+    }
     private lateinit var hud: TextView
     private lateinit var viewLabel: TextView
     private lateinit var titleLabel: TextView
@@ -338,6 +358,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer.requestThumbnails()
         onViewChanged()
         transformBar.visibility = if (transforming && !moveSession) View.VISIBLE else View.GONE
+        onAnimation(animExists, animFrame, animCount)
     }
 
     private fun buildChrome() {
@@ -426,6 +447,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
         rulerBtn = barBtn(R.drawable.ic_ruler_persp, "원근 자 · 동심원 자") { chooseRuler() }
+        animBtn = barBtn(R.drawable.ic_film, "애니메이션 타임라인 (없으면 애니메이션 폴더를 만듦)") {
+            if (!animExists) {
+                timelineOpen = true
+                renderer.createAnimation()
+            } else {
+                timelineOpen = !timelineOpen
+                onAnimation(animExists, animFrame, animCount)
+            }
+        }
         updateRulerButton()
         group("앱")
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
@@ -624,6 +654,55 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         transformBar = tb
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = Ui.dp(ctx, 16f)
+        })
+
+        // ---- 애니메이션 타임라인 바 ----
+        val ab = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(m, m / 2, m, m / 2)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            visibility = View.GONE
+        }
+        fun abBtn(icon: Int, tip: String, onClick: () -> Unit): ImageView {
+            val b = tips.bind(Ui.iconButton(ctx, icon, tip, 38f, ghost = true, onClick = onClick), tip)
+            ab.addView(b, Ui.square(ctx, 38f).apply { rightMargin = Ui.dp(ctx, 2f) })
+            return b
+        }
+        abBtn(R.drawable.ic_frame_prev, "이전 프레임") { stopPlayback(); renderer.setFrame(animFrame - 1) }
+        playBtn = abBtn(R.drawable.ic_play, "재생 / 정지") { togglePlayback() }
+        abBtn(R.drawable.ic_frame_next, "다음 프레임") { stopPlayback(); renderer.setFrame(animFrame + 1) }
+        frameLabel = Ui.text(ctx, "1 / 1", 13f, bold = true).apply { setPadding(Ui.dp(ctx, 6f), 0, Ui.dp(ctx, 8f), 0) }
+        ab.addView(frameLabel)
+        frameStrip = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        ab.addView(HorizontalScrollView(ctx).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(frameStrip)
+        }, LinearLayout.LayoutParams(Ui.dp(ctx, 200f), ViewGroup.LayoutParams.WRAP_CONTENT))
+        ab.addView(Ui.hspace(ctx, 6f))
+        abBtn(R.drawable.ic_layer_add, "새 프레임 (현재 프레임 뒤)") { stopPlayback(); renderer.addFrame(duplicate = false) }
+        abBtn(R.drawable.ic_duplicate, "프레임 복제") { stopPlayback(); renderer.addFrame(duplicate = true) }
+        abBtn(R.drawable.ic_trash, "프레임 삭제") { stopPlayback(); renderer.deleteFrame() }
+        onionBtn = abBtn(R.drawable.ic_onion, "어니언 스킨 (앞 프레임 빨강 · 뒤 프레임 파랑)") {
+            renderer.setOnionSkin(!renderer.onionSkin)
+            Ui.setOn(onionBtn, !renderer.onionSkin)
+        }
+        Ui.setOn(onionBtn, renderer.onionSkin)
+        val fpsBtn = Ui.button(ctx, "${settings.animFps}fps") {}
+        fpsBtn.setOnClickListener {
+            val list = intArrayOf(6, 8, 12, 15, 24)
+            val next = list[(list.indexOf(settings.animFps) + 1).mod(list.size)]
+            settings.animFps = next
+            settings.save()
+            fpsBtn.text = "${next}fps"
+        }
+        tips.bind(fpsBtn, "재생 속도 (누를 때마다 6 → 8 → 12 → 15 → 24)")
+        ab.addView(fpsBtn, Ui.wrap().apply { leftMargin = Ui.dp(ctx, 4f) })
+        animBar = ab
+        // 도구 막대 오른쪽, 아래에 (오른쪽 패널과 겹치지 않게 왼쪽 기준)
+        root.addView(animBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+            bottomMargin = Ui.dp(ctx, 16f)
+            leftMargin = Ui.dp(ctx, 90f)
         })
 
         // ---- 성능 측정 패널 ----
@@ -1177,6 +1256,50 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onBenchmarkDone(report: String) {
         benchText.text = report + String.format("\n(관문 2: 브러시 영역 합성이 %.1fms 이내면 %.0f fps 유지)", 1000f / 60f, 60f)
         Log.i(TAG, "benchmark\n$report")
+    }
+
+    override fun onAnimation(exists: Boolean, frame: Int, count: Int) {
+        animExists = exists
+        animFrame = frame
+        animCount = count
+        if (!::animBar.isInitialized) return
+        if (!exists) stopPlayback()
+        Ui.setOn(animBtn, exists && timelineOpen)
+        animBar.visibility = if (exists && timelineOpen && !transforming) View.VISIBLE else View.GONE
+        frameLabel.text = "${frame + 1} / $count"
+        // 프레임 칸: 번호 버튼 (누르면 그 프레임으로)
+        if (frameStrip.childCount != count) {
+            frameStrip.removeAllViews()
+            for (i in 0 until count) {
+                val b = Ui.button(this, "${i + 1}") { stopPlayback(); renderer.setFrame(i) }
+                frameStrip.addView(b, LinearLayout.LayoutParams(Ui.dp(this, 40f), Ui.dp(this, 34f)).apply { rightMargin = Ui.dp(this@MainActivity, 3f) })
+            }
+        }
+        for (i in 0 until frameStrip.childCount) Ui.setOn(frameStrip.getChildAt(i), i == frame)
+    }
+
+    private fun togglePlayback() {
+        if (animPlaying) stopPlayback() else {
+            if (animCount <= 1) {
+                showHud("프레임이 2장 이상이어야 재생합니다")
+                return
+            }
+            animPlaying = true
+            playBtn.setImageResource(R.drawable.ic_pause)
+            Ui.tint(playBtn)
+            ui.postDelayed(playTick, (1000f / settings.animFps).toLong())
+        }
+    }
+
+    private fun stopPlayback() {
+        if (!animPlaying) return
+        animPlaying = false
+        ui.removeCallbacks(playTick)
+        if (::playBtn.isInitialized) {
+            playBtn.setImageResource(R.drawable.ic_play)
+            Ui.tint(playBtn)
+        }
+        renderer.setFrame(animFrame) // 어니언 스킨 다시 표시
     }
 
     override fun onFilterEnded() {

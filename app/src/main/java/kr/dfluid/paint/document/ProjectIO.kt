@@ -63,6 +63,7 @@ object ProjectIO {
                 n.props.text?.let { o.put("text", it.toJson()) }
                 if (n.props.quickMask) o.put("quickMask", true)
                 if (n.props.borderWidth > 0f) o.put("borderWidth", n.props.borderWidth.toDouble()).put("borderColor", n.props.borderColor)
+                if (n.props.animation) o.put("animation", true)
                 if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
                 if (n.props.toneCell > 0f) o.put("toneCell", n.props.toneCell.toDouble()).put("toneAngle", n.props.toneAngle.toDouble()).put("toneColor", n.props.toneColor)
@@ -221,6 +222,7 @@ object ProjectIO {
         layerColorOn = o.optBoolean("layerColorOn", false),
         layerColor = o.optInt("layerColor", 0xFF3D8BFF.toInt()),
         vector = o.optBoolean("vector", false),
+        animation = o.optBoolean("animation", false),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

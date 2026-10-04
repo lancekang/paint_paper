@@ -57,6 +57,8 @@ data class LayerProps(
     val layerColor: Int = 0xFF3D8BFF.toInt(),
     /** 벡터 레이어: 선을 획 단위로 기억 (지우개 = 닿은 선 지우기, 변형해도 다시 그림) */
     val vector: Boolean = false,
+    /** 애니메이션 폴더: 자식 하나 = 프레임 한 장 (현재 프레임만 보임) */
+    val animation: Boolean = false,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

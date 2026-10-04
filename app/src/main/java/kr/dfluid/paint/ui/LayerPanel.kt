@@ -431,6 +431,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.reference) append(" · 참조")
             if (p.text != null) append(" · 텍스트")
             if (p.vector) append(" · 벡터")
+            if (p.animation) append(" · 애니메이션")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
             if (p.layerColorOn) append(" · 레이어 컬러")
