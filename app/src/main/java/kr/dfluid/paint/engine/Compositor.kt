@@ -12,6 +12,8 @@ class Compositor {
     private val copyTile = GlProgram(Shaders.TILE_VS, Shaders.COPY_FS)
     private val copyAffine = GlProgram(Shaders.AFFINE_VS, Shaders.COPY_FS)
     private val copyProj = GlProgram(Shaders.PROJ_VS, Shaders.COPY_FS)
+    private val copyMesh = GlProgram(Shaders.MESH_VS, Shaders.COPY_FS)
+    private val meshBuf = MeshBuffer()
     private val projCols = FloatArray(9)
     private val merge = GlProgram(Shaders.QUAD_VS, Shaders.MERGE_FS)
     private val blend = GlProgram(Shaders.QUAD_VS, Shaders.BLEND_FS)
@@ -106,6 +108,14 @@ class Compositor {
         GLES20.glUniform2f(copyProj.u("u_size"), w.toFloat(), h.toFloat())
         GLES20.glUniform2f(copyProj.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
         quad.draw()
+    }
+
+    /** 메시 변형으로 떠 있는 픽셀 그리기. tri = MeshWarp.triangles (캔버스 px + uv) */
+    fun drawMesh(tex: Int, tri: FloatArray, canvasW: Int, canvasH: Int, opacity: Float) {
+        setupCopy(copyMesh, tex, opacity, 0, 0)
+        GLES20.glUniform2f(copyMesh.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        GLES20.glUniform4f(copyMesh.u("u_uvMap"), 0f, 0f, 1f, 1f)
+        meshBuf.draw(tri)
     }
 
     /** 커버리지 텍스처 × 색. color0 = 프리멀티플라이드 RGBA. */

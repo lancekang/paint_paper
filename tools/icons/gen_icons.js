@@ -123,6 +123,7 @@ const icons = {
   // 끌기 손잡이: 가로줄 세 개
   drag: ['M5,8h14M5,12h14M5,16h14'],
   // 원근 변형: 기울어진 사각형 + 모서리 점
+  mesh: ['M4,4Q12,7 20,4Q17,12 20,20Q12,17 4,20Q7,12 4,4Z', 'M12,5.5Q10,12 12,18.5', 'M5.5,12Q12,10 18.5,12'],
   distort: ['M5,6L19,3L21,20L3,17Z', { d: circle(5, 6, 1.6), fill: true }, { d: circle(19, 3, 1.6), fill: true }, { d: circle(21, 20, 1.6), fill: true }, { d: circle(3, 17, 1.6), fill: true }],
   deselect: [dashedRect, 'M9,9l6,6M15,9l-6,6'],
   // 퀵 마스크: 점선 사각형 안에 채운 원

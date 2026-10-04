@@ -118,6 +118,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var rightPanel: View
     private lateinit var transformBar: View
     private var distortBtnRef: ImageView? = null
+    private var meshBtnRef: ImageView? = null
     // ---- 애니메이션 타임라인 ----
     private lateinit var animBar: LinearLayout
     /** 선택 범위 런처: 선택 영역이 있을 때 아래에 뜨는 빠른 동작 */
@@ -702,8 +703,21 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         distortBtn = tbBtn(R.drawable.ic_distort, "자유 모서리 (원근 변형: 모서리를 따로 끌기)") {
             overlay.setDistort(!overlay.distort)
             Ui.setOn(distortBtn, overlay.distort)
+            meshBtnRef?.let { Ui.setOn(it, overlay.mesh) }
         }
         distortBtnRef = distortBtn
+        lateinit var meshBtn: ImageView
+        meshBtn = tbBtn(R.drawable.ic_mesh, "메시 변형 (격자점을 끌어 휘기)") {
+            val a = lastNodes.firstOrNull { it.id == lastActiveId }
+            if (!overlay.mesh && a != null && a.props.mask && !renderer.maskEditing) {
+                showHud("마스크가 있는 레이어는 메시 변형할 수 없습니다 (마스크를 적용하거나 삭제한 뒤)")
+                return@tbBtn
+            }
+            overlay.setMesh(!overlay.mesh)
+            Ui.setOn(meshBtn, overlay.mesh)
+            Ui.setOn(distortBtn, overlay.distort)
+        }
+        meshBtnRef = meshBtn
         tb.addView(Ui.hspace(ctx, 8f))
         Ui.setOn(tbBtn(R.drawable.ic_check, "확정 (Enter)") { commitTransform() }, true)
         tbBtn(R.drawable.ic_close, "취소 (Esc)") { cancelTransform() }
@@ -1616,6 +1630,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         updateSelBar()
         onAnimation(animExists, animFrame, animCount)
         distortBtnRef?.let { Ui.setOn(it, false) }
+        meshBtnRef?.let { Ui.setOn(it, false) }
         overlay.startTransform(width, height, matrix)
         if (moveSession && (pendingMoveX != 0f || pendingMoveY != 0f)) overlay.translateBy(pendingMoveX, pendingMoveY)
         pendingMoveX = 0f; pendingMoveY = 0f

@@ -73,6 +73,21 @@ void main() {
 }
 """
 
+    /** 메시 변형: 삼각형 정점 = 캔버스 px + 떠 있는 텍스처 좌표. u_uvMap: uv × zw + xy */
+    const val MESH_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec2 a_uv;
+uniform vec2 u_canvas;
+uniform vec4 u_uvMap;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    v_uv = a_uv * u_uvMap.zw + u_uvMap.xy;
+    v_cuv = a_pos / u_canvas;
+    gl_Position = vec4(a_pos / u_canvas * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
     /**
      * 텍스처 복사 (+불투명도, +선택 마스크).
      * u_maskMode: 0 없음, 1 마스크 안만, 2 마스크 밖만

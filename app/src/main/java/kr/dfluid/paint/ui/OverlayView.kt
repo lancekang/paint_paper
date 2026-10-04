@@ -1,5 +1,6 @@
 package kr.dfluid.paint.ui
 
+import kr.dfluid.paint.engine.MeshWarp
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -84,6 +85,10 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         private set
     private val quad = FloatArray(8)
     private var gi = -1
+    /** 메시 변형 모드: 조절점 (MeshWarp.N + 1)²개를 캔버스 좌표로 (행 우선) */
+    var mesh = false
+        private set
+    private var meshPts = FloatArray(MeshWarp.POINTS * 2)
 
     private enum class Grab { NONE, MOVE, ROTATE, CORNER, EDGE }
 
@@ -166,6 +171,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
 
     fun startTransform(w: Int, h: Int, m: FloatArray) {
         distort = false
+        mesh = false
         tw = w.toFloat(); th = h.toFloat()
         // m은 이동만 있는 초기 행렬이라 중심/배율/회전으로 쉽게 분해됩니다.
         sx = hypot(m[0], m[1]).coerceAtLeast(1e-3f)
@@ -184,7 +190,9 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     fun translateBy(dx: Float, dy: Float) {
-        if (distort) {
+        if (mesh) {
+            for (i in 0 until MeshWarp.POINTS) { meshPts[i * 2] += dx; meshPts[i * 2 + 1] += dy }
+        } else if (distort) {
             for (i in 0 until 4) { quad[i * 2] += dx; quad[i * 2 + 1] += dy }
         } else {
             cx += dx; cy += dy
@@ -196,6 +204,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     fun setDistort(on: Boolean) {
         if (on == distort) return
         if (on) {
+            mesh = false
             val m = matrix()
             val pts = floatArrayOf(0f, 0f, tw, 0f, tw, th, 0f, th)
             for (i in 0 until 4) {
@@ -210,9 +219,27 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
 
     private fun homography(): FloatArray = kr.dfluid.paint.engine.Homography.rectToQuad(tw, th, quad)
 
+    /** 메시 변형 켜기/끄기. 켤 때 지금 모양(상자 또는 원근)에서 격자를 만들고, 끄면 원래 상자로. */
+    fun setMesh(on: Boolean) {
+        if (on == mesh) return
+        if (on) {
+            val h = if (distort) homography() else null
+            val m = matrix()
+            meshPts = MeshWarp.grid(tw, th) { u, v, out ->
+                if (h != null) kr.dfluid.paint.engine.Homography.map(h, u, v, out)
+                else { out[0] = m[0] * u + m[2] * v + m[4]; out[1] = m[1] * u + m[3] * v + m[5] }
+            }
+            distort = false
+        }
+        mesh = on
+        publish()
+    }
+
+    private fun meshIdx(i: Int, j: Int) = (j * (MeshWarp.N + 1) + i) * 2
+
     /** 이동만 했을 때 정수 픽셀로 맞춰 다시 샘플링으로 흐려지지 않게 합니다. */
     fun snapTranslation() {
-        if (distort) return
+        if (distort || mesh) return
         if (abs(rot) > 1e-4f || abs(abs(sx) - 1f) > 1e-4f || abs(abs(sy) - 1f) > 1e-4f) return
         val m = matrix()
         cx += Math.round(m[4]) - m[4]
@@ -221,7 +248,15 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     fun flip(horizontal: Boolean) {
-        if (distort) {
+        if (mesh) {
+            // 조절점 순서를 거울처럼 바꿔 뒤집음
+            val q = meshPts.copyOf()
+            val n = MeshWarp.N
+            for (j in 0..n) for (i in 0..n) {
+                val src = if (horizontal) meshIdx(n - i, j) else meshIdx(i, n - j)
+                meshPts[meshIdx(i, j)] = q[src]; meshPts[meshIdx(i, j) + 1] = q[src + 1]
+            }
+        } else if (distort) {
             // 모서리 순서를 바꿔 뒤집음
             val q = quad.copyOf()
             val order = if (horizontal) intArrayOf(1, 0, 3, 2) else intArrayOf(3, 2, 1, 0)
@@ -231,7 +266,16 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     fun rotateBy(rad: Float) {
-        if (distort) {
+        if (mesh) {
+            var ccx = 0f; var ccy = 0f
+            for (i in 0 until MeshWarp.POINTS) { ccx += meshPts[i * 2]; ccy += meshPts[i * 2 + 1] }
+            ccx /= MeshWarp.POINTS; ccy /= MeshWarp.POINTS
+            val c = cos(rad); val s = sin(rad)
+            for (i in 0 until MeshWarp.POINTS) {
+                val x = meshPts[i * 2] - ccx; val y = meshPts[i * 2 + 1] - ccy
+                meshPts[i * 2] = ccx + c * x - s * y; meshPts[i * 2 + 1] = ccy + s * x + c * y
+            }
+        } else if (distort) {
             val ccx = (quad[0] + quad[2] + quad[4] + quad[6]) / 4f
             val ccy = (quad[1] + quad[3] + quad[5] + quad[7]) / 4f
             val c = cos(rad); val s = sin(rad)
@@ -254,7 +298,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     private fun publish() {
-        listener?.onTransformChanged(if (distort) homography() else matrix())
+        listener?.onTransformChanged(if (mesh) meshPts.copyOf() else if (distort) homography() else matrix())
         invalidate()
     }
 
@@ -275,7 +319,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER && stylusSeen()) return false
-                grab = if (distort) hitDistort(e.x, e.y) else hitTest(e.x, e.y)
+                grab = if (mesh) hitMesh(e.x, e.y) else if (distort) hitDistort(e.x, e.y) else hitTest(e.x, e.y)
                 if (grab == Grab.NONE) return false
                 lastX = e.x; lastY = e.y
                 viewport.toScreen(cx, cy, tmp)
@@ -339,6 +383,34 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         return if (local[0] in 0f..tw && local[1] in 0f..th) Grab.MOVE else Grab.NONE
     }
 
+    /** 메시 모드: 조절점 = 그 점만, 바깥 테두리 안쪽 = 전체 이동 */
+    private fun hitMesh(x: Float, y: Float): Grab {
+        var best = -1
+        var bestD = touchR
+        for (i in 0 until MeshWarp.POINTS) {
+            viewport.toScreen(meshPts[i * 2], meshPts[i * 2 + 1], tmp)
+            val dd = hypot(x - tmp[0], y - tmp[1])
+            if (dd < bestD) { bestD = dd; best = i }
+        }
+        if (best >= 0) { gi = best; return Grab.CORNER }
+        // 바깥 테두리 조절점들로 만든 다각형 안인지 (짝홀 규칙)
+        viewport.toCanvas(x, y, tmp)
+        val px = tmp[0]; val py = tmp[1]
+        val n = MeshWarp.N
+        val ring = ArrayList<Int>()
+        for (i in 0 until n) ring.add(meshIdx(i, 0))
+        for (j in 0 until n) ring.add(meshIdx(n, j))
+        for (i in n downTo 1) ring.add(meshIdx(i, n))
+        for (j in n downTo 1) ring.add(meshIdx(0, j))
+        var inside = false
+        for (k in ring.indices) {
+            val a = ring[k]; val b = ring[(k + 1) % ring.size]
+            val ax = meshPts[a]; val ay = meshPts[a + 1]; val bx = meshPts[b]; val by = meshPts[b + 1]
+            if ((ay > py) != (by > py) && px < (bx - ax) * (py - ay) / (by - ay) + ax) inside = !inside
+        }
+        return if (inside) Grab.MOVE else Grab.NONE
+    }
+
     private fun screenToLocal(x: Float, y: Float): FloatArray {
         if (distort) {
             viewport.toCanvas(x, y, tmp)
@@ -356,6 +428,20 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     private fun drag(x: Float, y: Float) {
+        if (mesh) {
+            val a = FloatArray(2); val b = FloatArray(2)
+            viewport.toCanvas(lastX, lastY, a)
+            viewport.toCanvas(x, y, b)
+            val dx = b[0] - a[0]; val dy = b[1] - a[1]
+            when (grab) {
+                Grab.MOVE -> for (i in 0 until MeshWarp.POINTS) { meshPts[i * 2] += dx; meshPts[i * 2 + 1] += dy }
+                Grab.CORNER -> { meshPts[gi * 2] += dx; meshPts[gi * 2 + 1] += dy }
+                else -> return
+            }
+            lastX = x; lastY = y
+            publish()
+            return
+        }
         if (distort) {
             val a = FloatArray(2); val b = FloatArray(2)
             viewport.toCanvas(lastX, lastY, a)
@@ -636,7 +722,39 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         if (close) path.close()
     }
 
+    /** 메시 격자: 곡면을 따라 휜 선 + 조절점 */
+    private fun drawMesh(canvas: Canvas) {
+        val n = MeshWarp.N
+        val steps = n * 8
+        val p = FloatArray(2)
+        path.reset()
+        for (k in 0..n) {
+            for (s in 0..steps) {
+                MeshWarp.sample(meshPts, s / 8f, k.toFloat(), p)
+                viewport.toScreen(p[0], p[1], p)
+                if (s == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1])
+            }
+            for (s in 0..steps) {
+                MeshWarp.sample(meshPts, k.toFloat(), s / 8f, p)
+                viewport.toScreen(p[0], p[1], p)
+                if (s == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1])
+            }
+        }
+        canvas.drawPath(path, shadow)
+        canvas.drawPath(path, dash)
+        val r = handleR * 0.8f
+        for (i in 0 until MeshWarp.POINTS) {
+            viewport.toScreen(meshPts[i * 2], meshPts[i * 2 + 1], tmp)
+            canvas.drawCircle(tmp[0], tmp[1], r, handleFill)
+            canvas.drawCircle(tmp[0], tmp[1], r, handleStroke)
+        }
+    }
+
     private fun drawTransform(canvas: Canvas) {
+        if (mesh) {
+            drawMesh(canvas)
+            return
+        }
         val corners = floatArrayOf(0f, 0f, tw, 0f, tw, th, 0f, th)
         path.reset()
         for (i in 0 until 4) {
