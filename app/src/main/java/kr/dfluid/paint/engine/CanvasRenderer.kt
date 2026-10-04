@@ -44,7 +44,7 @@ data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val re
 /** 그라데이션 옵션. */
 data class GradientSpec(val radial: Boolean, val toTransparent: Boolean)
 
-/**
+    /**
  * 렌더링 엔진의 중심. GL 리소스는 모두 GL 스레드에서만 만집니다.
  *
  * UI 스레드는 public 메서드를 호출하고, 이 메서드들은 명령을 큐에 넣은 뒤 프레임을 요청합니다.
@@ -157,6 +157,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
         class Transform(val floating: RenderTarget, val bounds: IRect, var m: FloatArray, val whole: Boolean) : Op() {
             var lastRect: IRect = bounds
+            /** 레이어를 옮길 때 함께 옮기는 마스크 (마스크 편집 중이 아니고 마스크가 있을 때) */
+            var maskFloating: RenderTarget? = null
+            var maskBounds: IRect? = null
+
+            /** 마스크 떠 있는 픽셀의 행렬: 레이어 행렬에 두 경계의 차이만큼 평행이동을 더함 */
+            fun maskMatrix(): FloatArray? {
+                val mb = maskBounds ?: return null
+                val dx = (mb.x - bounds.x).toFloat()
+                val dy = (mb.y - bounds.y).toFloat()
+                return floatArrayOf(m[0], m[1], m[2], m[3], m[4] + m[0] * dx + m[2] * dy, m[5] + m[1] * dx + m[3] * dy)
+            }
         }
     }
 
@@ -1419,7 +1430,27 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fl.setFilter(GLES20.GL_LINEAR_MIPMAP_LINEAR, GLES20.GL_LINEAR)
         GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
         val m = floatArrayOf(1f, 0f, 0f, 1f, bounds.x.toFloat(), bounds.y.toFloat())
-        op = Op.Transform(fl, bounds, m, whole = !hasSelection)
+        val tr = Op.Transform(fl, bounds, m, whole = !hasSelection)
+        // 레이어를 옮기면 마스크도 같이 (같은 선택 범위 안의 마스크 픽셀)
+        val ms = if (!isMaskEdit(n) && n.props.mask) surfaces[-n.id] else null
+        if (ms != null && ms.tileCount > 0) {
+            val mb = if (hasSelection) selBounds?.let { contentBounds(ms, it) } else ms.tileBounds()?.let { contentBounds(ms, it) }
+            if (mb != null) {
+                val mf = RenderTarget(mb.w, mb.h)
+                GlState.bindFbo(mf.fbo)
+                GLES20.glViewport(-mb.x, -mb.y, d.width, d.height)
+                GlState.off()
+                for ((key, t) in ms.tiles) {
+                    if (!ms.tileRect(key).intersects(mb)) continue
+                    compositor.drawTile(t.tex, ms.originX(key), ms.originY(key), d.width, d.height, 1f, selTexIfAny(), if (hasSelection) 1 else 0)
+                }
+                mf.setFilter(GLES20.GL_LINEAR, GLES20.GL_LINEAR)
+                tr.maskFloating = mf
+                tr.maskBounds = mb
+                markDirty(mb)
+            }
+        }
+        op = tr
         markDirty(bounds)
         val bw = bounds.w
         val bh = bounds.h
@@ -1452,10 +1483,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return IRect(minX, minY, maxX - minX + 1, maxY - minY + 1)
     }
 
-    private fun transformedRect(o: Op.Transform, d: Document): IRect? {
-        val m = o.m
-        val w = o.bounds.w.toFloat()
-        val h = o.bounds.h.toFloat()
+    private fun transformedRect(o: Op.Transform, d: Document): IRect? = transformedRect(o.bounds, o.m, d)
+
+    private fun transformedRect(bounds: IRect, m: FloatArray, d: Document): IRect? {
+        val w = bounds.w.toFloat()
+        val h = bounds.h.toFloat()
         val xs = floatArrayOf(m[4], m[0] * w + m[4], m[2] * h + m[4], m[0] * w + m[2] * h + m[4])
         val ys = floatArrayOf(m[5], m[1] * w + m[5], m[3] * h + m[5], m[1] * w + m[3] * h + m[5])
         return IRect.ofBounds(xs.min() - 2, ys.min() - 2, xs.max() + 2, ys.max() + 2, d.width, d.height)
@@ -1467,46 +1499,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (n == null || s == null) {
             endTransform(o); return
         }
-        val target = transformedRect(o, d)
-        val rect = o.bounds.union(target)
-        val saved = HashMap<Int, ByteBuffer?>()
-        val sel = selTexIfAny()
-        for (key in s.keysIntersecting(rect)) {
-            val existing = s.tiles[key]
-            val inTarget = target?.intersects(s.tileRect(key)) == true
-            if (existing == null && !inTarget) continue
-            saved[key] = s.read(key)
-            val t = s.getOrCreate(key)
-            s.bindCanvasSpace(key, t)
-            // 1) 들어 올린 자리 지우기
-            o.bounds.intersect(s.tileRect(key))?.let { lift ->
-                s.scissorCanvasRect(key, lift)
-                if (o.whole) {
-                    GLES20.glClearColor(0f, 0f, 0f, 0f)
-                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                } else {
-                    GlState.erase()
-                    compositor.drawMergeCoverage(sel, WHITE, 1f, 0, d.width, d.height)
-                    GlState.off()
-                }
-            }
-            // 2) 변형된 픽셀 올리기
-            if (inTarget) {
-                val r = target.intersect(s.tileRect(key))
-                if (r != null) {
-                    s.scissorCanvasRect(key, r)
-                    // 변형은 투명 픽셀 잠금과 상관없이 옮깁니다 (잠금이면 들어 올린 자리가 비어 아무것도 안 그려짐).
-                    GlState.over()
-                    compositor.drawAffine(o.floating.tex, o.bounds.w, o.bounds.h, o.m, d.width, d.height, 1f)
-                    GlState.off()
-                }
-            }
-            GlState.noScissor()
-            s.dropIfEmpty(key)
-        }
-        saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
+        val saved = placeFloating(s, o.floating, o.bounds, o.m, o.whole, d)
         val parts = ArrayList<HistoryCommand>()
-        if (saved.isNotEmpty()) parts.add(TilesCommand(n.id, saved))
+        if (saved.isNotEmpty()) parts.add(TilesCommand(editId(n), saved))
+        // 함께 옮긴 마스크
+        val mf = o.maskFloating
+        val mb = o.maskBounds
+        val ms = surfaces[-n.id]
+        if (mf != null && mb != null && ms != null) {
+            val ms2 = placeFloating(ms, mf, mb, o.maskMatrix()!!, o.whole, d)
+            if (ms2.isNotEmpty()) parts.add(TilesCommand(-n.id, ms2))
+            thumbQueue.add(-n.id)
+        }
         if (hasSelection) {
             val before = selEncoded
             val am = Matrix()
@@ -1523,8 +1527,55 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         notifyHistory()
     }
 
+    /**
+     * 떠 있는 픽셀을 [s]에 내려놓습니다: 들어 올린 자리를 지우고(whole이면 전부, 아니면 선택 영역만) 변형해 그립니다.
+     * 바뀐 타일의 이전 내용을 돌려줍니다 (실행취소용).
+     */
+    private fun placeFloating(s: TileSurface, floating: RenderTarget, bounds: IRect, m: FloatArray, whole: Boolean, d: Document): HashMap<Int, ByteBuffer?> {
+        val target = transformedRect(bounds, m, d)
+        val rect = bounds.union(target)
+        val saved = HashMap<Int, ByteBuffer?>()
+        val sel = selTexIfAny()
+        for (key in s.keysIntersecting(rect)) {
+            val existing = s.tiles[key]
+            val inTarget = target?.intersects(s.tileRect(key)) == true
+            if (existing == null && !inTarget) continue
+            saved[key] = s.read(key)
+            val t = s.getOrCreate(key)
+            s.bindCanvasSpace(key, t)
+            // 1) 들어 올린 자리 지우기
+            bounds.intersect(s.tileRect(key))?.let { lift ->
+                s.scissorCanvasRect(key, lift)
+                if (whole) {
+                    GLES20.glClearColor(0f, 0f, 0f, 0f)
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                } else {
+                    GlState.erase()
+                    compositor.drawMergeCoverage(sel, WHITE, 1f, 0, d.width, d.height)
+                    GlState.off()
+                }
+            }
+            // 2) 변형된 픽셀 올리기
+            if (inTarget) {
+                val r = target.intersect(s.tileRect(key))
+                if (r != null) {
+                    s.scissorCanvasRect(key, r)
+                    // 변형은 투명 픽셀 잠금과 상관없이 옮깁니다 (잠금이면 들어 올린 자리가 비어 아무것도 안 그려짐).
+                    GlState.over()
+                    compositor.drawAffine(floating.tex, bounds.w, bounds.h, m, d.width, d.height, 1f)
+                    GlState.off()
+                }
+            }
+            GlState.noScissor()
+            s.dropIfEmpty(key)
+        }
+        saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
+        return saved
+    }
+
     private fun endTransform(o: Op.Transform) {
         o.floating.release()
+        o.maskFloating?.release()
         op = null
         markAllDirty()
         main.post { listener.onTransformEnded() }
@@ -1753,6 +1804,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val base = sourceOf(n)
         if (!n.props.mask || !n.props.maskEnabled) return base
         val d = doc!!
+        val tr = op as? Op.Transform
+        val moving = tr?.maskFloating != null && n.id == d.activeId && !isMaskEdit(n)
         val maskSrc = if (op != null && n.id == d.activeId && isMaskEdit(n)) Src.Tex(preview!!)
         else Src.Tiles(surfaces[-n.id] ?: return base)
         val tmp = maskTmp ?: RenderTarget(d.width, d.height).also { maskTmp = it }
@@ -1762,7 +1815,19 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         GlState.off()
         drawSourceCopy(base, 1f, r)
         GlState.erase()
-        drawSourceCopy(maskSrc, 1f, r)
+        if (moving && tr != null) {
+            // 들어 올린 자리를 뺀 마스크 + 옮겨진 마스크
+            if (!tr.whole) {
+                val ms = (maskSrc as Src.Tiles).s
+                for ((key, tile) in ms.tiles) {
+                    if (!ms.tileRect(key).intersects(r)) continue
+                    compositor.drawTile(tile.tex, ms.originX(key), ms.originY(key), d.width, d.height, 1f, selTex!!.tex, 2)
+                }
+            }
+            compositor.drawAffine(tr.maskFloating!!.tex, tr.maskBounds!!.w, tr.maskBounds!!.h, tr.maskMatrix()!!, d.width, d.height, 1f)
+        } else {
+            drawSourceCopy(maskSrc, 1f, r)
+        }
         GlState.off()
         GlState.noScissor()
         return Src.Tex(tmp)
