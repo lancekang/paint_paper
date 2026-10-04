@@ -2032,6 +2032,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             main.post { listener.onRendererError("아래 레이어가 클리핑 레이어이면 병합할 수 없습니다.") }
             return@post
         }
+        if (a.props.adjustKind != null || below.props.adjustKind != null) {
+            main.post { listener.onRendererError("색조 보정 레이어는 병합할 수 없습니다 (보이는 그림 병합 복사를 쓰세요).") }
+            return@post
+        }
         if (!a.props.visible) {
             main.post { listener.onRendererError("숨긴 레이어는 병합할 수 없습니다.") }
             return@post
@@ -2312,7 +2316,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         add(smudgeBuf); add(smudgePatch)
         borderBufs?.forEach { add(it) }
-        add(toneBuf); add(colorBuf); add(paperBuf); add(wcBuf)
+        add(toneBuf); add(colorBuf); add(paperBuf); add(wcBuf); add(adjBuf)
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -2573,6 +2577,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         smudgeBuf?.release(); smudgeBuf = null
         borderBufs?.forEach { it.release() }; borderBufs = null
         toneBuf?.release(); toneBuf = null
+        adjBuf?.release(); adjBuf = null
         navTarget?.release(); navTarget = null
         navSent = -1L
         colorBuf?.release(); colorBuf = null
@@ -2607,6 +2612,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         smudgePatch = null
         borderBufs = null
         toneBuf = null
+        adjBuf = null
         navTarget = null
         navSent = -1L
         colorBuf = null
@@ -2660,6 +2666,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         if (!allowLocked && (n.props.locked || lockedByFolder(n))) {
             reportError("잠긴 레이어입니다. 레이어 ⋯ 메뉴에서 잠금을 푸세요.")
+            return null
+        }
+        if (n.props.adjustKind != null) {
+            reportError("색조 보정 레이어에는 그릴 수 없습니다. 레이어 ⋯ → 보정 값 편집으로 바꾸세요.")
             return null
         }
         if (!allowText && n.props.text != null) {
@@ -3644,6 +3654,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             composeAnim(n, t, r, depth)
             return
         }
+        if (n.isRaster && n.props.adjustKind != null) {
+            composeAdjust(n, t, r)
+            return
+        }
         if (n.isRaster) {
             drawSource(layerSrc(n, r), t, n.props.blend, n.props.opacity, false, r)
             return
@@ -3656,6 +3670,61 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         g.cur.clear(r)
         composeChildren(n.children, 0, n.children.size, g, r, depth + 1)
         drawSource(Src.Tex(g.cur), t, normalBlend(n), n.props.opacity, false, r)
+    }
+
+    /** 보정 레이어용 버퍼와 톤 커브 표 캐시 (값이 같으면 다시 만들지 않음) */
+    private var adjBuf: RenderTarget? = null
+    private val adjLut = HashMap<Int, kotlin.Pair<List<Float>, FloatArray>>()
+
+    private fun adjustParams(n: Node, kind: FilterKind): FloatArray {
+        val v = n.props.adjustValues
+        if (kind != FilterKind.TONE_CURVE) return v.toFloatArray()
+        adjLut[n.id]?.let { (vals, arr) -> if (vals == v) return arr }
+        val pts = if (v.size >= 4) v.toFloatArray() else floatArrayOf(0f, 0f, 1f, 1f)
+        val arr = FloatArray(8) + kr.dfluid.paint.brush.PressureCurve.lut(pts, FilterKind.TONE_LUT)
+        adjLut[n.id] = v to arr
+        return arr
+    }
+
+    /** 색조 보정 레이어: 지금까지 쌓인 결과(t.cur)를 필터에 통과시켜 불투명도만큼 섞음 ([r] 안만) */
+    private fun composeAdjust(n: Node, t: PingPong, r: IRect) {
+        val kind = FilterKind.entries.firstOrNull { it.name == n.props.adjustKind } ?: return
+        if (kind.blurs) return
+        val d = doc!!
+        val buf = adjBuf ?: RenderTarget(d.width, d.height).also { adjBuf = it }
+        buf.bind()
+        GlState.scissor(r)
+        GlState.off()
+        compositor.drawFilter(kind.shaderId, t.cur.tex, adjustParams(n, kind))
+        t.cur.bind()
+        GlState.scissor(r)
+        // 결과 = 보정 × 불투명도 + 원래 × (1 − 불투명도)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendEquation(GLES20.GL_FUNC_ADD)
+        GLES20.glBlendColor(0f, 0f, 0f, n.props.opacity)
+        GLES20.glBlendFunc(GLES20.GL_CONSTANT_ALPHA, GLES20.GL_ONE_MINUS_CONSTANT_ALPHA)
+        compositor.drawCopy(buf.tex, 1f)
+        GlState.off()
+        GlState.noScissor()
+    }
+
+    /** 색조 보정 레이어를 활성 위에 만들고, 만든 id와 속성을 [done]으로 (메인 스레드) */
+    fun addAdjustLayer(kind: FilterKind, values: List<Float>, done: (Int, LayerProps) -> Unit) = post {
+        finishOp()
+        var props: LayerProps? = null
+        structural { d ->
+            val a = d.active
+            val parent = a?.parent ?: d.root
+            val idx = if (a != null) a.index + 1 else parent.children.size
+            val p = LayerProps("보정: " + kind.label.substringBefore(" ("), adjustKind = kind.name, adjustValues = values)
+            val n = Node(d.newId(), NodeKind.RASTER, p)
+            insert(parent, idx, n)
+            props = p
+            n.id
+        }
+        val id = doc?.activeId ?: return@post
+        val p = props ?: return@post
+        main.post { done(id, p) }
     }
 
     private fun normalBlend(n: Node) = if (n.props.blend == BlendMode.PASS_THROUGH) BlendMode.NORMAL else n.props.blend

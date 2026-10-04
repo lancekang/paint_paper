@@ -29,6 +29,7 @@ import kr.dfluid.paint.brush.Brush
 import kr.dfluid.paint.brush.BrushLibrary
 import kr.dfluid.paint.brush.TipImage
 import kr.dfluid.paint.brush.Tool
+import kr.dfluid.paint.document.LayerProps
 import kr.dfluid.paint.document.CanvasEdit
 import kr.dfluid.paint.document.DocumentData
 import kr.dfluid.paint.document.NodeInfo
@@ -394,6 +395,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         tips = Ui.Tips { a -> shortcuts.get(a).firstOrNull()?.label() }
         toolButtons.clear()
         layerPanel = LayerPanel(this, renderer, tips)
+        layerPanel.onEditAdjust = { id, p ->
+            FilterKind.entries.firstOrNull { it.name == p.adjustKind }?.let { showFilter(it, id, p) }
+        }
+        layerPanel.onNewAdjust = { chooseAdjustLayer() }
         toolOptions = ToolOptions(this, this)
         val ctx = this
         val m = Ui.dp(ctx, 8f)
@@ -1924,20 +1929,61 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             .show()
     }
 
-    /** 값 슬라이더 대화상자. 움직이는 동안 캔버스에 미리보기, 적용하면 실행취소 한 단계. */
-    private fun showFilter(kind: FilterKind) {
+    /** 색조 보정 레이어 종류 고르기 (흐리기 계열은 빼고) → 만들고 바로 값 편집 */
+    private fun chooseAdjustLayer() {
+        if (transforming) commitTransform()
+        val kinds = FilterKind.entries.filter { !it.blurs }
+        Ui.dialog(this)
+            .setTitle("색조 보정 레이어")
+            .setItems(kinds.map { it.label }.toTypedArray()) { _, which ->
+                val k = kinds[which]
+                renderer.addAdjustLayer(k, adjustValuesFor(k, k.params.map { it.default * it.scale }, floatArrayOf(0f, 0f, 1f, 1f), null)) { id, p ->
+                    showFilter(k, id, p)
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    /** 보정 레이어에 저장할 값: 그라데이션 맵은 색(기존 것 또는 주색·보조색), 톤 커브는 조절점 */
+    private fun adjustValuesFor(kind: FilterKind, v: List<Float>, curve: FloatArray, old: List<Float>?): List<Float> {
+        if (kind == FilterKind.TONE_CURVE) return curve.toList()
+        if (kind != FilterKind.GRADIENT_MAP) return v
+        if (old != null && old.size >= v.size + 6) return v + old.subList(v.size, v.size + 6)
+        fun rgb(c: Int) = listOf(Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f)
+        return v + rgb(settings.primaryColor) + rgb(settings.secondaryColor)
+    }
+
+    /**
+     * 값 슬라이더 대화상자. 움직이는 동안 캔버스에 미리보기, 적용하면 실행취소 한 단계.
+     * [adjustId]가 있으면 그 색조 보정 레이어의 값을 고침 (픽셀 대신 레이어 속성).
+     */
+    private fun showFilter(kind: FilterKind, adjustId: Int? = null, adjustStart: LayerProps? = null) {
         val ctx = this
         val values = IntArray(kind.params.size) { kind.params[it].default }
         var curvePts = floatArrayOf(0f, 0f, 1f, 1f)
+        if (adjustStart != null) {
+            val old = adjustStart.adjustValues
+            if (kind == FilterKind.TONE_CURVE) {
+                if (old.size >= 4 && old.size % 2 == 0) curvePts = old.toFloatArray()
+            } else kind.params.forEachIndexed { i, p ->
+                old.getOrNull(i)?.let { v -> values[i] = kotlin.math.round(v / p.scale).toInt().coerceIn(p.min, p.max) }
+            }
+        }
         fun spec(): FilterSpec {
             val v = kind.params.mapIndexed { i, p -> values[i] * p.scale }
             if (kind == FilterKind.TONE_CURVE) {
                 return FilterSpec(kind, List(8) { 0f } + kr.dfluid.paint.brush.PressureCurve.lut(curvePts, FilterKind.TONE_LUT).toList())
             }
-            if (kind != FilterKind.GRADIENT_MAP) return FilterSpec(kind, v)
-            // 그라데이션 맵: 주색(어두운 곳) → 보조색(밝은 곳)
-            fun rgb(c: Int) = listOf(Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f)
-            return FilterSpec(kind, v + rgb(settings.primaryColor) + rgb(settings.secondaryColor))
+            return FilterSpec(kind, adjustValuesFor(kind, v, curvePts, adjustStart?.adjustValues))
+        }
+        // 보정 레이어면 레이어 속성으로 미리보기, 아니면 필터 작업으로
+        fun adjustProps(): LayerProps? = adjustStart?.copy(
+            adjustValues = adjustValuesFor(kind, kind.params.mapIndexed { i, p -> values[i] * p.scale }, curvePts, adjustStart.adjustValues),
+        )
+        fun preview() {
+            if (adjustId != null) renderer.setProps(adjustId, adjustProps()!!, record = false)
+            else renderer.setFilter(spec())
         }
         fun label(i: Int): String {
             val p = kind.params[i]
@@ -1956,7 +2002,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 row.onChange = { prog ->
                     values[i] = prog + p.min
                     row.set(prog, label(i))
-                    renderer.setFilter(spec())
+                    preview()
                 }
                 body.addView(row.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = Ui.dp(ctx, 4f)
@@ -1969,14 +2015,19 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             cv.live = true
             cv.onChanged = { pts ->
                 curvePts = pts.copyOf()
-                renderer.setFilter(spec())
+                preview()
             }
             body.addView(Ui.text(ctx, "가로 = 원래 밝기, 세로 = 바뀐 밝기. 빈 곳을 누르면 점 추가, 점을 두 번 누르면 삭제", 11.5f, Ui.MUTED))
             body.addView(cv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = Ui.dp(ctx, 4f)
             })
         } else null
-        body.addView(Ui.text(ctx, if (renderer.maskEditing) "마스크에 적용합니다." else "선택 영역이 있으면 그 안에만 적용합니다.", 11.5f, Ui.MUTED).apply {
+        val note = when {
+            adjustId != null -> "색조 보정 레이어: 아래에 쌓인 그림 전체에 적용합니다 (픽셀은 그대로, 불투명도로 세기 조절)."
+            renderer.maskEditing -> "마스크에 적용합니다."
+            else -> "선택 영역이 있으면 그 안에만 적용합니다."
+        }
+        body.addView(Ui.text(ctx, note, 11.5f, Ui.MUTED).apply {
             setPadding(0, Ui.dp(ctx, 6f), 0, 0)
         })
         var finished = false
@@ -1985,7 +2036,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             .setView(body)
             .setPositiveButton("적용") { _, _ ->
                 finished = true
-                renderer.commitFilter()
+                if (adjustId != null) renderer.setProps(adjustId, adjustProps()!!, record = true, before = adjustStart)
+                else renderer.commitFilter()
             }
             .setNegativeButton("취소", null)
             .apply { if (kind.params.isNotEmpty() || curveView != null) setNeutralButton("초기화", null) }
@@ -1993,7 +2045,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         dlg.setOnDismissListener {
             if (!finished) {
                 finished = true
-                renderer.cancelFilter()
+                if (adjustId != null) renderer.setProps(adjustId, adjustStart!!, record = false)
+                else renderer.cancelFilter()
             }
             if (filterDialog === dlg) filterDialog = null
         }
@@ -2006,7 +2059,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 }
                 curvePts = floatArrayOf(0f, 0f, 1f, 1f)
                 curveView?.points = curvePts
-                renderer.setFilter(spec())
+                preview()
             }
         }
         // 미리보기가 보이게: 배경을 어둡게 하지 않고 화면 아래쪽에 띄움
@@ -2016,7 +2069,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
         filterDialog = dlg
         dlg.show()
-        renderer.beginFilter(spec())
+        if (adjustId == null) renderer.beginFilter(spec())
     }
 
     @Suppress("DEPRECATION")

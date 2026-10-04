@@ -70,6 +70,12 @@ data class LayerProps(
     /** 레이어 효과 "수채 경계": 폭(px, 0 = 끔)과 진하기 0..1 */
     val wcWidth: Float = 0f,
     val wcStrength: Float = 0.6f,
+    /**
+     * 색조 보정 레이어: 아래에 쌓인 그림 전체에 거는 필터 (FilterKind 이름, null = 일반 레이어).
+     * 값은 필터 대화상자의 값 (배율 적용 후, 그라데이션 맵은 색 6개 포함, 톤 커브는 조절점 x,y …). 픽셀은 쓰지 않음
+     */
+    val adjustKind: String? = null,
+    val adjustValues: List<Float> = emptyList(),
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

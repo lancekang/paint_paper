@@ -44,6 +44,10 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
 
     private val active: NodeInfo? get() = nodes.firstOrNull { it.id == activeId }
 
+    /** 색조 보정 레이어 편집 / 새로 만들기 (MainActivity가 연결: 필터 대화상자를 씀) */
+    var onEditAdjust: ((Int, LayerProps) -> Unit)? = null
+    var onNewAdjust: (() -> Unit)? = null
+
     /** 여러 레이어 고르기: 켜져 있으면 행을 누를 때 고름/풂 */
     private var multi = false
     private val picked = LinkedHashSet<Int>()
@@ -204,6 +208,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             }
         }
         if (info.props.vector) add("벡터 선 굵기 바꾸기…") { widthDialog(info) }
+        if (info.props.adjustKind != null) add("보정 값 편집…") { onEditAdjust?.invoke(info.id, info.props) }
+        add("색조 보정 레이어 만들기…") { onNewAdjust?.invoke() }
         add("보이는 그림을 새 레이어로 (병합 복사)") { renderer.mergeVisible(flatten = false) }
         add("그림 통합 (모든 레이어를 하나로)…") {
             Dialogs.confirm(ctx, "모든 레이어를 보이는 그대로 한 장으로 합칩니다. 숨긴 레이어는 사라지고 밑그림 레이어는 남습니다 (실행취소 가능).", "통합") {

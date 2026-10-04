@@ -70,6 +70,9 @@ object ProjectIO {
                 if (n.props.paperStrength > 0f) o.put("paperStrength", n.props.paperStrength.toDouble()).put("paperScale", n.props.paperScale.toDouble()).put("paperKind", n.props.paperKind)
                 if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
+                n.props.adjustKind?.let { k ->
+                    o.put("adjustKind", k).put("adjustValues", JSONArray().apply { n.props.adjustValues.forEach { put(it.toDouble()) } })
+                }
                 if (n.props.toneCell > 0f) o.put("toneCell", n.props.toneCell.toDouble()).put("toneAngle", n.props.toneAngle.toDouble()).put("toneColor", n.props.toneColor)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
                 if (n.kind == NodeKind.RASTER && n.props.mask) {
@@ -234,6 +237,8 @@ object ProjectIO {
         paperKind = o.optInt("paperKind", 0).coerceIn(0, 2),
         wcWidth = o.optDouble("wcWidth", 0.0).toFloat().coerceIn(0f, 40f),
         wcStrength = o.optDouble("wcStrength", 0.6).toFloat().coerceIn(0f, 1f),
+        adjustKind = o.optString("adjustKind", "").takeIf { k -> k.isNotEmpty() && kr.dfluid.paint.engine.FilterKind.entries.any { it.name == k } },
+        adjustValues = o.optJSONArray("adjustValues")?.let { a -> List(a.length()) { a.optDouble(it, 0.0).toFloat() } } ?: emptyList(),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */
