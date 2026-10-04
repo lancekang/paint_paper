@@ -159,9 +159,54 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         shortcuts.load() // 설정 화면에서 바뀌었을 수 있음
         tips.refresh()
         enterImmersive()
+        ui.removeCallbacks(autosaveTick)
+        ui.postDelayed(autosaveTick, AUTOSAVE_CHECK_MS)
+    }
+
+    // ---- 주기적 자동 저장 ----
+    // 앱이 백그라운드로 갈 때만 저장하면, 그리는 중 앱이 죽었을 때 그 사이 작업을 잃습니다.
+    // 손을 뗀 채 잠시 쉬고 있을 때(펜·손가락이 닿아 있지 않고 IDLE_MS 이상 입력 없음) 주기적으로 저장합니다.
+
+    private var lastInteraction = 0L
+    private var pointerDown = false
+    private var lastAutosaveAt = 0L
+    private var autosaving = false
+
+    private val autosaveTick = object : Runnable {
+        override fun run() {
+            maybeAutosave()
+            ui.postDelayed(this, AUTOSAVE_CHECK_MS)
+        }
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        lastInteraction = android.os.SystemClock.uptimeMillis()
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> pointerDown = true
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> pointerDown = false
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun maybeAutosave() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (autosaving && now - lastAutosaveAt > 60_000) autosaving = false // 콜백이 오지 않은 경우 대비
+        if (autosaving || pointerDown || transforming || moveSession) return
+        if (lastInteraction == 0L || renderer.version == autosavedVersion) return
+        if (now - lastInteraction < IDLE_MS || now - lastAutosaveAt < AUTOSAVE_INTERVAL_MS) return
+        autosaving = true
+        lastAutosaveAt = now
+        val saved = savedVersion
+        renderer.captureDocument { data, composite, version ->
+            io.execute {
+                writeAutosave(data, composite, version, clean = version == saved)
+                ui.post { autosaving = false }
+            }
+        }
     }
 
     override fun onPause() {
+        ui.removeCallbacks(autosaveTick)
         dispatcher.releaseAll()
         settings.save()
         library.save()
@@ -784,6 +829,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // =====================================================================
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        lastInteraction = android.os.SystemClock.uptimeMillis()
         shiftHeld = event.isShiftPressed
         altHeld = event.isAltPressed
         if (transforming && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -1161,6 +1207,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             // 자동 저장본이 마지막으로 저장한 파일과 같은 내용인지 기록 (복원 시 * 표시 판단)
             getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean(KEY_AUTOSAVE_CLEAN, clean).commit()
             ui.post { autosavedVersion = version }
+            Log.i(TAG, "자동 저장 완료 (버전 $version)")
         } catch (e: Exception) {
             Log.e(TAG, "autosave failed", e)
         }
@@ -1207,6 +1254,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_TIP = 13
         private const val REQ_EXPORT_PSD = 14
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"
+        /** 자동 저장 확인 주기 / 저장 간격 / 이만큼 입력이 없어야 저장 */
+        private const val AUTOSAVE_CHECK_MS = 10_000L
+        private const val AUTOSAVE_INTERVAL_MS = 120_000L
+        private const val IDLE_MS = 3_000L
         private val ROTATE_STEP = (Math.PI / 12).toFloat()
     }
 }
