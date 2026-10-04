@@ -514,6 +514,42 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
+    /** 둘러싸고 칠하기: 올가미 [pts](캔버스 좌표) 안의 닫힌 영역을 모두 채웁니다. */
+    fun fillEnclosed(pts: FloatArray, opts: FillOptions, color: Int, opacity: Float) = post {
+        val d = doc ?: return@post
+        val n = editableActive() ?: return@post
+        finishOp()
+        if (pts.size < 6) return@post
+        val ref = referenceImage(d, n, opts.ref)
+        val sel = if (hasSelection) selection?.toBuffer() else null
+        val w = d.width
+        val h = d.height
+        val docRef = d
+        val targetId = n.id
+        worker.execute {
+            val res = try {
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+                android.graphics.Canvas(bmp).drawPath(SelectionMask.shapePath(SelShape.LASSO, pts), android.graphics.Paint().apply { this.color = Color.BLACK })
+                val rb = bmp.rowBytes
+                val raw = ByteBuffer.allocate(rb * h)
+                bmp.copyPixelsToBuffer(raw)
+                bmp.recycle()
+                val arr = raw.array()
+                val lasso = ByteArray(w * h)
+                for (y in 0 until h) System.arraycopy(arr, y * rb, lasso, y * w, w)
+                FloodFill.enclose(ref, w, h, lasso, opts.tolerance, opts.gap, opts.expand, sel)
+            } catch (e: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 채우지 못했습니다.") }
+                return@execute
+            }
+            if (res == null) {
+                main.post { listener.onRendererError("올가미 안에 선으로 닫힌 영역이 없습니다.") }
+                return@execute
+            }
+            post { applyFill(docRef, targetId, res, color, opacity) }
+        }
+    }
+
     /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
     /** true면 합성에서 밑그림 레이어를 뺌 (내보내기·채우기 참조용으로 잠깐만) */
     private var hideDrafts = false

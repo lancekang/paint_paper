@@ -86,6 +86,109 @@ object FloodFill {
         return Result(out, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
     }
 
+    /**
+     * 둘러싸고 칠하기: [lasso](w*h, 0 아니면 안쪽) 안에서, 선으로 닫혀 밖과 이어지지 않은 영역을 모두 채웁니다.
+     * 선 = 참조 이미지의 "잉크"(흰 바탕에 올렸을 때의 어두움)가 기준보다 진한 곳. 올가미 밖에서 닿을 수 있는 칸은 뺍니다.
+     */
+    fun enclose(
+        ref: ByteBuffer, w: Int, h: Int, lasso: ByteArray,
+        tolerance: Int, gap: Int, expand: Int, selection: ByteBuffer?,
+    ): Result? {
+        var bx0 = w; var by0 = h; var bx1 = -1; var by1 = -1
+        for (y in 0 until h) for (x in 0 until w) if (lasso[y * w + x].toInt() != 0) {
+            if (x < bx0) bx0 = x
+            if (x > bx1) bx1 = x
+            if (y < by0) by0 = y
+            if (y > by1) by1 = y
+        }
+        if (bx1 < 0) return null
+        val pad = gap + expand + 2
+        bx0 = max(0, bx0 - pad); by0 = max(0, by0 - pad)
+        bx1 = minOf(w - 1, bx1 + pad); by1 = minOf(h - 1, by1 + pad)
+        val bw = bx1 - bx0 + 1
+        val bh = by1 - by0 + 1
+        val n = bw * bh
+        val px = ref.duplicate()
+        // 1. 선: 허용 오차가 클수록 옅은 선도 벽으로 봄
+        val limit = (255 - tolerance.coerceIn(0, 254)) * 0.5f
+        var walls = ByteArray(n)
+        for (y in 0 until bh) for (x in 0 until bw) {
+            val o = ((by0 + y) * w + bx0 + x) * 4
+            val a = px.get(o + 3).toInt() and 0xFF
+            if (a == 0) continue
+            // 프리멀티플라이드를 흰 바탕에 올린 밝기 = rgb + (255 − a)
+            val rr = (px.get(o).toInt() and 0xFF) + 255 - a
+            val gg = (px.get(o + 1).toInt() and 0xFF) + 255 - a
+            val bb = (px.get(o + 2).toInt() and 0xFF) + 255 - a
+            val ink = 255f - (0.299f * rr + 0.587f * gg + 0.114f * bb)
+            if (ink >= limit) walls[y * bw + x] = 1
+        }
+        val rawWalls = walls
+        if (gap > 0) walls = dilate(walls, bw, bh, gap)
+        // 2. 밖(올가미 밖 + 상자 테두리)에서 닿는 칸
+        val open = ByteArray(n) { if (walls[it].toInt() == 0) 1 else 0 }
+        val reach = ByteArray(n)
+        val stack = IntArrayStack()
+        for (y in 0 until bh) for (x in 0 until bw) {
+            val i = y * bw + x
+            val inside = lasso[(by0 + y) * w + bx0 + x].toInt() != 0
+            val edge = x == 0 || y == 0 || x == bw - 1 || y == bh - 1
+            if ((!inside || edge) && open[i].toInt() != 0 && reach[i].toInt() == 0) {
+                reach[i] = 1
+                stack.push(x, y)
+                while (stack.isNotEmpty()) {
+                    val cy = stack.popY()
+                    val cx = stack.popX()
+                    for (k in 0 until 4) {
+                        val nx = cx + DX[k]
+                        val ny = cy + DY[k]
+                        if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue
+                        val j = ny * bw + nx
+                        if (open[j].toInt() != 0 && reach[j].toInt() == 0) {
+                            reach[j] = 1
+                            stack.push(nx, ny)
+                        }
+                    }
+                }
+            }
+        }
+        // 3. 안쪽의 닫힌 칸
+        var region = ByteArray(n)
+        for (y in 0 until bh) for (x in 0 until bw) {
+            val i = y * bw + x
+            if (open[i].toInt() != 0 && reach[i].toInt() == 0 && lasso[(by0 + y) * w + bx0 + x].toInt() != 0) region[i] = 1
+        }
+        // 4. 틈 메우기로 줄어든 만큼 되돌리기 (원래 선 픽셀은 제외) + 확장
+        if (gap > 0) {
+            val grown = dilate(region, bw, bh, gap)
+            for (i in 0 until n) if (rawWalls[i].toInt() != 0 && region[i].toInt() == 0) grown[i] = 0
+            region = grown
+        }
+        if (expand > 0) region = dilate(region, bw, bh, expand)
+        // 5. 캔버스 크기 마스크로 + 선택 영역과 교차
+        val sel = selection?.duplicate()
+        val out = ByteArray(w * h)
+        var minX = w; var minY = h; var maxX = -1; var maxY = -1
+        for (y in 0 until bh) for (x in 0 until bw) {
+            if (region[y * bw + x].toInt() == 0) continue
+            val cx = bx0 + x
+            val cy = by0 + y
+            val i = cy * w + cx
+            val v = if (sel != null) sel.get(i).toInt() and 0xFF else 255
+            if (v == 0) continue
+            out[i] = v.toByte()
+            if (cx < minX) minX = cx
+            if (cx > maxX) maxX = cx
+            if (cy < minY) minY = cy
+            if (cy > maxY) maxY = cy
+        }
+        if (maxX < 0) return null
+        return Result(out, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
+    }
+
+    private val DX = intArrayOf(1, -1, 0, 0)
+    private val DY = intArrayOf(0, 0, 1, -1)
+
     private fun scanlineFill(fillable: ByteArray, w: Int, h: Int, sx: Int, sy: Int): ByteArray {
         val out = ByteArray(w * h)
         if (fillable[sy * w + sx].toInt() == 0) return out

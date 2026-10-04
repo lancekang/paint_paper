@@ -326,6 +326,9 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildFill() {
         val s = host.settings
+        view.addView(toggleRow(listOf("누른 곳 채우기", "둘러싸고 칠하기"), if (s.fillEnclose) 1 else 0) {
+            s.fillEnclose = it == 1; s.save()
+        }, lp(2f))
         view.addView(toggleRow(listOf("모든 레이어", "현재 레이어", "참조 레이어"), s.fillRef) {
             s.fillRef = it; s.save()
         }, lp(6f))
@@ -333,7 +336,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         intSlider("틈 메우기", 0, 10, { s.fillGap }, { s.fillGap = it }) { if (it == 0) "끔" else "${it}px" }
         intSlider("영역 확장", 0, 6, { s.fillExpand }, { s.fillExpand = it }) { "${it}px" }
         intSlider("불투명도", 1, 100, { (s.fillOpacity * 100).roundToInt() }, { s.fillOpacity = it / 100f }) { "$it%" }
-        view.addView(hint("Alt+Backspace = 선택 영역을 주색으로 채우기"), lp())
+        view.addView(hint("둘러싸고 칠하기: 올가미로 감싸면 그 안에서 선으로 닫힌 칸을 모두 칠합니다 (허용 오차가 클수록 옅은 선도 벽으로 봄). Alt+Backspace = 선택 영역을 주색으로 채우기"), lp())
     }
 
     private fun intSlider(label: String, min: Int, max: Int, get: () -> Int, set: (Int) -> Unit, fmt: (Int) -> String) {

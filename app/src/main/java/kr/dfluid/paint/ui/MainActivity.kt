@@ -1253,6 +1253,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Dialogs.textEditor(this, init, settings) { spec -> renderer.createText(spec) }
     }
 
+    override val fillEnclose: Boolean get() = settings.fillEnclose
+
+    override fun onFillLasso(pts: FloatArray) {
+        renderer.fillEnclosed(pts, settings.fillOptions, settings.primaryColor, settings.fillOpacity)
+        settings.pushRecent(settings.primaryColor)
+    }
+
     override fun onFillTap(x: Float, y: Float) {
         renderer.fillAt(x.toInt(), y.toInt(), settings.fillOptions, settings.primaryColor, settings.fillOpacity)
         settings.pushRecent(settings.primaryColor)

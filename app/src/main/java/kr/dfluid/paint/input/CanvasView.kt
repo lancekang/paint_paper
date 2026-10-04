@@ -66,6 +66,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         /** tiny = 거의 움직이지 않은 탭 (선택 해제로 처리) */
         fun onSelectDone(shape: SelShape, pts: FloatArray, tiny: Boolean)
         fun onFillTap(x: Float, y: Float)
+        /** 채우기 도구가 둘러싸고 칠하기 모드인지 / 그 올가미가 끝났을 때 */
+        val fillEnclose: Boolean
+        fun onFillLasso(pts: FloatArray)
         /** 텍스트 도구로 누름 (캔버스 좌표) */
         fun onTextTap(x: Float, y: Float)
         /** 자동 선택 도구로 누름 (캔버스 좌표) */
@@ -84,6 +87,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
 
     // ---- 도형 ----
     private var shapeBrush: Brush? = null
+    /** 지금 올가미가 둘러싸고 칠하기용인지 */
+    private var fillLasso = false
     private val lassoPts = ArrayList<Float>()
     /** 마지막 도형 계산 결과 (말풍선은 펜을 뗄 때 채우기·선을 따로 확정) */
     private var lastLine = FloatArray(0)
@@ -365,6 +370,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             h.holdMode == HoldMode.EYEDROPPER || tool == Tool.EYEDROPPER || stylusButton -> Mode.PICK
             tool == Tool.MOVE -> Mode.MOVE
             tool == Tool.GRADIENT -> Mode.GRADIENT
+            tool == Tool.FILL && h.fillEnclose -> {
+                fillLasso = true
+                Mode.SELECT
+            }
             tool == Tool.FILL -> {
                 h.onFillTap(downCx, downCy)
                 Mode.IGNORE
@@ -379,7 +388,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         }
         when (mode) {
             Mode.SELECT -> {
-                selShape = h.selectShape
+                selShape = if (fillLasso) SelShape.LASSO else h.selectShape
                 selPts.clear()
                 selPts.add(downCx); selPts.add(downCy)
                 if (selShape != SelShape.LASSO) { selPts.add(downCx); selPts.add(downCy) }
@@ -725,7 +734,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 val pts = selPts.toFloatArray()
                 val tiny = if (selShape == SelShape.LASSO) pts.size < 6
                 else hypot(pts[2] - pts[0], pts[3] - pts[1]) * viewport.scale < 4f
-                h.onSelectDone(selShape, pts, tiny)
+                if (fillLasso) {
+                    fillLasso = false
+                    h.onSelectPreview(selShape, FloatArray(0))
+                    if (!tiny) h.onFillLasso(pts)
+                } else h.onSelectDone(selShape, pts, tiny)
             }
             Mode.GRADIENT -> {
                 viewport.toCanvas(e.getX(i), e.getY(i), tmp)
