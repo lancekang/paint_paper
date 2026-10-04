@@ -37,6 +37,7 @@ class Compositor {
     private val borderH = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_H_FS)
     private val tone = GlProgram(Shaders.QUAD_VS, Shaders.TONE_FS)
     private val colorize = GlProgram(Shaders.QUAD_VS, Shaders.COLORIZE_FS)
+    private val paper = GlProgram(Shaders.QUAD_VS, Shaders.PAPER_FS)
     private val borderV = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_V_FS)
     private val filterCombine = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_COMBINE_FS)
     private val viewMatrix = FloatArray(9)
@@ -241,6 +242,18 @@ class Compositor {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         unbind1()
+    }
+
+    /** 용지 질감: srcTex(캔버스 크기) → 현재 타깃. 블렌딩 끄고 호출. */
+    fun drawPaper(srcTex: Int, canvasW: Int, canvasH: Int, strength: Float, scale: Float, kind: Int) {
+        paper.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(paper.u("u_src"), 0)
+        GLES20.glUniform2f(paper.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        GLES20.glUniform1f(paper.u("u_strength"), strength)
+        GLES20.glUniform1f(paper.u("u_scale"), scale)
+        GLES20.glUniform1i(paper.u("u_kind"), kind)
+        quad.draw()
     }
 
     /** 레이어 컬러: srcTex(캔버스 크기) → 현재 타깃. 블렌딩 끄고 호출. */

@@ -196,6 +196,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var toneBuf: RenderTarget? = null
     /** 레이어 컬러 결과 버퍼 */
     private var colorBuf: RenderTarget? = null
+    /** 용지 질감 결과 버퍼 */
+    private var paperBuf: RenderTarget? = null
     private var smudgePatch: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
@@ -1907,7 +1909,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         add(smudgeBuf); add(smudgePatch)
         borderBufs?.forEach { add(it) }
-        add(toneBuf); add(colorBuf)
+        add(toneBuf); add(colorBuf); add(paperBuf)
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -2170,6 +2172,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         navTarget?.release(); navTarget = null
         navSent = -1L
         colorBuf?.release(); colorBuf = null
+        paperBuf?.release(); paperBuf = null
         smudgePatch?.release(); smudgePatch = null
         maskEditing = false
         pairs.forEach { it.release() }
@@ -2202,6 +2205,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         navTarget = null
         navSent = -1L
         colorBuf = null
+        paperBuf = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
@@ -3270,6 +3274,31 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return Src.Tex(out)
     }
 
+    /** 용지 질감 적용 소스 ([r] 영역) */
+    private fun paperSrc(n: Node, src: Src, r: IRect): Src {
+        val d = doc!!
+        val b = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
+        val srcTex = when (src) {
+            is Src.Tex -> src.t
+            is Src.Tiles -> {
+                b[0].clear(r)
+                b[0].bind()
+                GlState.scissor(r)
+                GlState.off()
+                drawSourceCopy(src, 1f, r)
+                GlState.noScissor()
+                b[0]
+            }
+        }
+        val out = paperBuf ?: RenderTarget(d.width, d.height).also { paperBuf = it }
+        out.bind()
+        GlState.scissor(r)
+        GlState.off()
+        compositor.drawPaper(srcTex.tex, d.width, d.height, n.props.paperStrength, n.props.paperScale, n.props.paperKind)
+        GlState.noScissor()
+        return Src.Tex(out)
+    }
+
     /** 톤 효과: 농도를 망점으로 바꾼 소스 ([r] 영역). */
     private fun toneSrc(n: Node, src: Src, r: IRect): Src {
         val d = doc!!
@@ -3299,15 +3328,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val bw = n.props.borderWidth
         val toned = n.props.toneCell > 0f
         val colored = n.props.layerColorOn
+        val papered = n.props.paperStrength > 0f
         if (bw <= 0f) {
             var m = maskedSrc(n, r)
+            if (papered) m = paperSrc(n, m, r)
             if (colored) m = colorizeSrc(n, m, r)
             return if (toned) toneSrc(n, m, r) else m
         }
         val d = doc!!
         val reach = kotlin.math.ceil(bw).toInt() + 1
         val er = IRect.ofBounds((r.x - reach).toFloat(), (r.y - reach).toFloat(), (r.right + reach).toFloat(), (r.bottom + reach).toFloat(), d.width, d.height) ?: r
-        val src = maskedSrc(n, er).let { if (colored) colorizeSrc(n, it, er) else it }.let { if (toned) toneSrc(n, it, er) else it }
+        val src = maskedSrc(n, er).let { if (papered) paperSrc(n, it, er) else it }.let { if (colored) colorizeSrc(n, it, er) else it }.let { if (toned) toneSrc(n, it, er) else it }
         val bufs = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
         // 이웃을 읽으려면 텍스처여야 합니다 (타일이면 한 장에 모음).
         val srcTex = when (src) {

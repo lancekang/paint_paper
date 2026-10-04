@@ -148,6 +148,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         if (raster) {
             add(if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") { borderDialog(info) }
             add(if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") { toneDialog(info) }
+            add(if (info.props.paperStrength > 0f) "용지 질감 · 켜짐…" else "용지 질감 (종이 결)…") { paperDialog(info) }
             add(if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") {
                 if (info.props.layerColorOn) renderer.setProps(info.id, info.props.copy(layerColorOn = false), record = true)
                 else layerColorDialog(info)
@@ -241,6 +242,57 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             .setPositiveButton("확인") { _, _ -> if (pct != 100) renderer.scaleVectorWidth(info.id, pct / 100f) }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    /** 용지 질감: 종류·세기·결 크기를 미리보며 */
+    private fun paperDialog(info: NodeInfo) {
+        val start = info.props
+        var strength = if (start.paperStrength > 0f) start.paperStrength else 0.5f
+        var scale = start.paperScale
+        var kind = start.paperKind
+        fun apply(record: Boolean) = renderer.setProps(info.id, start.copy(paperStrength = strength, paperScale = scale, paperKind = kind), record, if (record) start else null)
+        val pad = Ui.dp(ctx, 20f)
+        val kinds = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val kb = ArrayList<View>()
+        listOf("고운 종이", "캔버스 천", "거친 종이").forEachIndexed { i, l ->
+            val b = Ui.button(ctx, l) { kind = i; kb.forEachIndexed { j, v -> Ui.setOn(v, j == i) }; apply(false) }
+            Ui.setOn(b, i == kind)
+            kb.add(b)
+            kinds.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 4f) })
+        }
+        val sRow = Ui.SliderRow(ctx, "세기", 100)
+        sRow.set((strength * 100).roundToInt(), "${(strength * 100).roundToInt()}%")
+        sRow.onChange = { p -> strength = (p / 100f).coerceAtLeast(0.01f); sRow.set(p, "$p%"); apply(false) }
+        val cRow = Ui.SliderRow(ctx, "결 크기", 75)
+        cRow.set(((scale - 0.25f) * 10f).roundToInt().coerceIn(0, 75), String.format("%.1f×", scale))
+        cRow.onChange = { p -> scale = 0.25f + p / 10f; cRow.set(p, String.format("%.1f×", scale)); apply(false) }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+            addView(kinds)
+            addView(sRow.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 6f) })
+            addView(cRow.view)
+            addView(Ui.text(ctx, "종이 결의 골에는 물감이 덜 묻은 것처럼 보이게 합니다. 픽셀은 그대로입니다.", 11.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(ctx, 8f), 0, 0) })
+        }
+        var done = false
+        val dlg = Ui.dialog(ctx)
+            .setTitle("용지 질감 · ${info.props.name}")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ -> done = true; apply(true) }
+            .setNeutralButton("효과 끄기") { _, _ ->
+                done = true
+                renderer.setProps(info.id, start.copy(paperStrength = 0f), true, start)
+            }
+            .setNegativeButton("취소", null)
+            .create()
+        dlg.setOnDismissListener { if (!done) renderer.setProps(info.id, start, false) }
+        dlg.window?.let { w ->
+            w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setGravity(Gravity.BOTTOM)
+        }
+        dlg.show()
+        apply(false)
     }
 
     /** 레이어 컬러: 미리 정한 색 몇 가지 + 색 지정. 고르면 바로 켜짐 (실행취소 한 단계). */
@@ -474,6 +526,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.animation) append(" · 애니메이션")
             if (p.locked) append(" · 잠김")
             if (p.draft) append(" · 밑그림")
+            if (p.paperStrength > 0f) append(" · 질감")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
             if (p.layerColorOn) append(" · 레이어 컬러")

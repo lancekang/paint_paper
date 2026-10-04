@@ -503,6 +503,55 @@ void main() {
 }
 """
 
+    /**
+     * 용지 질감: 종이 결(절차적 잡음)만큼 레이어의 알파를 깎아 결이 보이게 (캔버스 좌표 고정이라 옮겨도 결은 그대로).
+     * u_kind 0 종이(고운 결), 1 캔버스 천(격자 무늬), 2 거친 종이
+     */
+    const val PAPER_FS = """#version 300 es
+precision highp float;
+precision highp int;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform vec2 u_canvas;
+uniform float u_strength;
+uniform float u_scale;
+uniform int u_kind;
+out vec4 o;
+
+float hash(vec2 p) {
+    uvec2 q = uvec2(ivec2(floor(p)) + 65536) * uvec2(1597334673u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334673u;
+    return float(n) * (1.0 / 4294967295.0);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main() {
+    vec4 s = texture(u_src, v_cuv);
+    vec2 p = v_cuv * u_canvas / u_scale;
+    float g;
+    if (u_kind == 1) {
+        // 캔버스 천: 가로·세로 실이 엇갈리는 무늬 + 잔결
+        vec2 c = fract(p / 6.0);
+        float weave = abs(sin(c.x * 6.2831853)) * abs(sin(c.y * 6.2831853));
+        g = mix(weave, noise(p * 0.7), 0.35);
+    } else if (u_kind == 2) {
+        g = noise(p * 0.12) * 0.55 + noise(p * 0.4) * 0.3 + noise(p) * 0.15;
+    } else {
+        g = noise(p * 0.5) * 0.5 + noise(p * 1.3) * 0.5;
+    }
+    // 결의 낮은 곳(골)에서 물감이 덜 묻음
+    float keep = 1.0 - u_strength * (1.0 - smoothstep(0.15, 0.85, g));
+    o = s * keep;
+}
+"""
+
     /** 레이어 컬러: 알파는 그대로, 색만 u_color로 (밝은 부분은 흰색 쪽으로 남겨 선의 농담을 유지). */
     const val COLORIZE_FS = """#version 300 es
 precision highp float;

@@ -66,6 +66,7 @@ object ProjectIO {
                 if (n.props.animation) o.put("animation", true)
                 if (n.props.locked) o.put("locked", true)
                 if (n.props.draft) o.put("draft", true)
+                if (n.props.paperStrength > 0f) o.put("paperStrength", n.props.paperStrength.toDouble()).put("paperScale", n.props.paperScale.toDouble()).put("paperKind", n.props.paperKind)
                 if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
                 if (n.props.toneCell > 0f) o.put("toneCell", n.props.toneCell.toDouble()).put("toneAngle", n.props.toneAngle.toDouble()).put("toneColor", n.props.toneColor)
@@ -227,6 +228,9 @@ object ProjectIO {
         animation = o.optBoolean("animation", false),
         locked = o.optBoolean("locked", false),
         draft = o.optBoolean("draft", false),
+        paperStrength = o.optDouble("paperStrength", 0.0).toFloat().coerceIn(0f, 1f),
+        paperScale = o.optDouble("paperScale", 1.0).toFloat().coerceIn(0.25f, 8f),
+        paperKind = o.optInt("paperKind", 0).coerceIn(0, 2),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

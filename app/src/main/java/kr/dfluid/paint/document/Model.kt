@@ -63,6 +63,10 @@ data class LayerProps(
     val locked: Boolean = false,
     /** 밑그림 레이어: 화면에는 보이지만 내보내기와 채우기·자동 선택(모든 레이어 참조)에서 빠짐 */
     val draft: Boolean = false,
+    /** 레이어 효과 "용지 질감": 세기 0..1 (0 = 끔), 결 크기 배율, 종류(0 종이 1 캔버스 천 2 거친 종이) */
+    val paperStrength: Float = 0f,
+    val paperScale: Float = 1f,
+    val paperKind: Int = 0,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */
