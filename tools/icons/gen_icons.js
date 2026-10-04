@@ -127,6 +127,8 @@ const icons = {
     { d: 'M2,12C2,12 5.5,5 12,5C18.5,5 22,12 22,12C22,12 18.5,19 12,19C5.5,19 2,12 2,12Z', alpha: 0.45 },
     { d: circle(12, 12, 3), alpha: 0.45 }, 'M3,3l18,18',
   ],
+  ruler_persp: ['M2,7h20', 'M12,7L3,21', 'M12,7L21,21', 'M12,7L8.5,21', 'M12,7L15.5,21', { d: circle(12, 7, 1.8), fill: true }],
+  ruler_circle: [circle(12, 12, 9.5), circle(12, 12, 5.5), { d: circle(12, 12, 1.8), fill: true }],
   more: [{ d: circle(5, 12, 1.6), fill: true }, { d: circle(12, 12, 1.6), fill: true }, { d: circle(19, 12, 1.6), fill: true }],
   mask: [rect(3, 3, 18, 18, 2), { d: circle(12, 12, 5), fill: true, alpha: 0.9 }],
   chevron_right: ['M9,6l6,6l-6,6'],

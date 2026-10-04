@@ -46,6 +46,9 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     private var gradient: FloatArray? = null
 
     // ---- 대칭 안내선 ----
+    /** 원근 자·동심원 자 (MainActivity가 연결) */
+    var ruler: kr.dfluid.paint.input.GuideRuler? = null
+
     private var symMode = SymMode.OFF
     private var symCount = 6
 
@@ -91,6 +94,16 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         strokeWidth = Ui.dp(context, 1f).toFloat()
         color = 0xCC35C4D8.toInt()
         pathEffect = DashPathEffect(floatArrayOf(6f, 6f), 0f)
+    }
+    private val rulerLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = Ui.dp(context, 1f).toFloat()
+        color = 0x6635C4D8
+    }
+    private val rulerMain = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = Ui.dp(context, 1.5f).toFloat()
+        color = 0xCC35C4D8.toInt()
     }
     private val handleR = Ui.dp(context, 7f).toFloat()
     private val touchR = Ui.dp(context, 22f).toFloat()
@@ -318,6 +331,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
 
     override fun onDraw(canvas: Canvas) {
         if (symMode != SymMode.OFF) drawSymmetry(canvas)
+        ruler?.takeIf { it.on }?.let { drawRuler(canvas, it) }
         selShape?.let { drawSelectionGuide(canvas, it) }
         gradient?.let { g ->
             val a = FloatArray(2); val b = FloatArray(2)
@@ -330,6 +344,61 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
             canvas.drawCircle(b[0], b[1], handleR, handleStroke)
         }
         if (transformActive) drawTransform(canvas)
+    }
+
+    /** 자 안내선: 캔버스 안쪽에만 그리고, 손잡이(소실점·중심)는 어디에 있든 표시합니다. */
+    private fun drawRuler(canvas: Canvas, r: kr.dfluid.paint.input.GuideRuler) {
+        val w = viewport.canvasW
+        val h = viewport.canvasH
+        val diag = hypot(w, h)
+        val a = FloatArray(2); val b = FloatArray(2)
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) {
+            viewport.toScreen(x0, y0, a)
+            viewport.toScreen(x1, y1, b)
+            canvas.drawLine(a[0], a[1], b[0], b[1], p)
+        }
+        // 캔버스 모양으로 잘라서 그림
+        path.reset()
+        viewport.toScreen(0f, 0f, a); path.moveTo(a[0], a[1])
+        viewport.toScreen(w, 0f, a); path.lineTo(a[0], a[1])
+        viewport.toScreen(w, h, a); path.lineTo(a[0], a[1])
+        viewport.toScreen(0f, h, a); path.lineTo(a[0], a[1])
+        path.close()
+        canvas.save()
+        canvas.clipPath(path)
+        when (r.kind) {
+            kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE -> {
+                val far = diag * 3f
+                for (i in 0 until r.vpCount) {
+                    val vx = r.vp[i * 2]; val vy = r.vp[i * 2 + 1]
+                    for (k in 0 until 36) {
+                        val t = (k * 10.0 * Math.PI / 180.0).toFloat()
+                        line(vx, vy, vx + far * cos(t), vy + far * sin(t), rulerLine)
+                    }
+                }
+                // 지평선 (1·2점)
+                if (r.vpCount <= 2) {
+                    val hy = if (r.vpCount == 1) r.vp[1] else (r.vp[1] + r.vp[3]) / 2f
+                    if (r.vpCount == 1) line(-far, hy, far, hy, rulerMain)
+                    else line(r.vp[0] - (r.vp[2] - r.vp[0]) * 4f, r.vp[1] - (r.vp[3] - r.vp[1]) * 4f,
+                        r.vp[2] + (r.vp[2] - r.vp[0]) * 4f, r.vp[3] + (r.vp[3] - r.vp[1]) * 4f, rulerMain)
+                }
+            }
+            kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC -> {
+                viewport.toScreen(r.cx, r.cy, a)
+                val s = viewport.scale
+                for (k in 1..12) canvas.drawCircle(a[0], a[1], diag / 12f * k * s, rulerLine)
+            }
+            kr.dfluid.paint.input.GuideRuler.Kind.OFF -> Unit
+        }
+        canvas.restore()
+        val hs = r.handles()
+        for (k in 0 until hs.size / 2) {
+            viewport.toScreen(hs[k * 2], hs[k * 2 + 1], a)
+            canvas.drawCircle(a[0], a[1], handleR * 1.4f, handleFill)
+            canvas.drawCircle(a[0], a[1], handleR * 1.4f, handleStroke)
+            canvas.drawCircle(a[0], a[1], handleR * 0.35f, handleStroke)
+        }
     }
 
     private fun drawSymmetry(canvas: Canvas) {

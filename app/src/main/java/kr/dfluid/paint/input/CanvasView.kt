@@ -39,6 +39,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val drawWithFinger: Boolean
         val symmetry: Symmetry
         val straightLine: Boolean
+        /** 원근 자·동심원 자 */
+        val ruler: GuideRuler
+        /** 자 손잡이(소실점·중심)를 옮겼을 때 (안내선 다시 그리기) */
+        fun onRulerChanged()
         fun brushFor(tool: Tool): Brush
         fun onStrokeStarted()
         fun onColorPicked(color: Int)
@@ -65,7 +69,65 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     var host: Host? = null
     val viewport = Viewport()
 
-    private enum class Mode { NONE, DRAW, PICK, DRAG_PAN, DRAG_ROTATE, DRAG_ZOOM, GESTURE, IGNORE, SELECT, GRADIENT, MOVE }
+    private enum class Mode { NONE, DRAW, PICK, DRAG_PAN, DRAG_ROTATE, DRAG_ZOOM, GESTURE, IGNORE, SELECT, GRADIENT, MOVE, RULER }
+
+    // ---- 원근 자·동심원 자 ----
+    // 획을 시작하고 RULER_DECIDE_DP 만큼 움직여야 방향을 알 수 있으므로, 그 전까지의 점은 모아 둡니다.
+    private var rulerPending = false
+    private var rulerC: GuideRuler.Constraint? = null
+    private val pendingPts = ArrayList<FloatArray>() // [x, y, 필압, 기울기, 방향]
+    private var strokeBrush: Brush? = null
+    private var rulerHandle = -1
+    private val rp = FloatArray(2)
+    private val density = context.resources.displayMetrics.density
+
+    /** 화면 좌표 (x,y) 가까이에 있는 자 손잡이 번호 (없으면 -1) */
+    private fun rulerHandleAt(x: Float, y: Float, h: Host): Int {
+        if (!h.ruler.on) return -1
+        val hs = h.ruler.handles()
+        val p = FloatArray(2)
+        var best = -1
+        var bestD = 26f * density
+        for (k in 0 until hs.size / 2) {
+            viewport.toScreen(hs[k * 2], hs[k * 2 + 1], p)
+            val d = hypot(p[0] - x, p[1] - y)
+            if (d < bestD) { bestD = d; best = k }
+        }
+        return best
+    }
+
+    /** 자가 켜져 있으면 획 시작을 미룹니다. 점 하나를 받아 빌더에 넣거나(방향 정해짐) 모읍니다. */
+    private fun feedPoint(x: Float, y: Float, p: Float, tl: Float, an: Float, h: Host) {
+        if (rulerPending) {
+            pendingPts.add(floatArrayOf(x, y, p, tl, an))
+            val s = pendingPts[0]
+            if (hypot(x - s[0], y - s[1]) * viewport.scale >= RULER_DECIDE_DP * density) resolveRuler(h, free = false)
+            return
+        }
+        val c = rulerC
+        if (c != null) {
+            c.project(x, y, rp)
+            builder.add(rp[0], rp[1], p, tl, an)
+        } else {
+            builder.add(x, y, p, tl, an)
+        }
+    }
+
+    /** 방향을 정하고 모아 둔 점들로 획을 시작합니다. free = true면 자 없이 (짧은 탭 등). */
+    private fun resolveRuler(h: Host, free: Boolean) {
+        val brush = strokeBrush ?: return
+        val s = pendingPts.firstOrNull() ?: return
+        val last = pendingPts.last()
+        rulerC = if (free) null else h.ruler.constraintFor(s[0], s[1], last[0] - s[0], last[1] - s[1])
+        rulerPending = false
+        builder.begin(brush, h.smoothing, s[0], s[1], s[2], s[3], s[4])
+        taper.begin(brush.taperIn, brush.taperOut)
+        for (k in 1 until pendingPts.size) {
+            val q = pendingPts[k]
+            feedPoint(q[0], q[1], q[2], q[3], q[4], h)
+        }
+        pendingPts.clear()
+    }
 
     private var mode = Mode.NONE
     private var primaryId = -1
@@ -268,6 +330,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             h.holdMode == HoldMode.ZOOM -> Mode.DRAG_ZOOM
             // 변형 중에는 상자 밖을 눌러도 그리거나 선택하지 않습니다.
             h.transformActive && tool != Tool.MOVE -> Mode.IGNORE
+            // 자 손잡이 위에서 시작하면 그리지 않고 손잡이를 옮깁니다.
+            rulerHandleAt(x, y, h).also { rulerHandle = it } >= 0 -> Mode.RULER
             // 선택 도구에서 Alt는 "빼기"라서 스포이드로 바꾸지 않습니다.
             tool == Tool.SELECT && h.selectShape == SelShape.WAND -> {
                 h.onWandTap(downCx, downCy)
@@ -306,7 +370,16 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     lineStartX = tmp[0]; lineStartY = tmp[1]
                     linePressure = p; lineTilt = tl; lineAngle = an
                     updateLine(tmp[0], tmp[1], h)
+                } else if (h.ruler.on) {
+                    // 방향이 정해질 때까지 모읍니다.
+                    strokeBrush = brush
+                    rulerPending = true
+                    rulerC = null
+                    pendingPts.clear()
+                    pendingPts.add(floatArrayOf(tmp[0], tmp[1], p, tl, an))
                 } else {
+                    rulerPending = false
+                    rulerC = null
                     builder.begin(brush, h.smoothing, tmp[0], tmp[1], p, tl, an)
                     taper.begin(brush.taperIn, brush.taperOut)
                     builder.drain()?.let { emitStamps(taper.push(it), h) }
@@ -331,8 +404,14 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     /** 직선 자: 시작점→(cx,cy) 직선을 만들어 스트로크 버퍼를 통째로 갱신합니다. 대칭 복제본·입출 포함. */
     private fun updateLine(cx: Float, cy: Float, h: Host) {
         val brush = lineBrush ?: return
+        var ex = cx
+        var ey = cy
+        // 자가 켜져 있으면 끝점을 원근선/동심원 위로 (동심원은 원호 대신 시작점과 같은 반지름의 점으로)
+        h.ruler.constraintFor(lineStartX, lineStartY, cx - lineStartX, cy - lineStartY)?.let {
+            it.project(cx, cy, rp); ex = rp[0]; ey = rp[1]
+        }
         builder.begin(brush, 0f, lineStartX, lineStartY, linePressure, lineTilt, lineAngle)
-        builder.add(cx, cy, linePressure, lineTilt, lineAngle)
+        builder.add(ex, ey, linePressure, lineTilt, lineAngle)
         var base = builder.drain() ?: FloatArray(0)
         if (brush.taperIn > 0f || brush.taperOut > 0f) {
             taper.begin(brush.taperIn, brush.taperOut)
@@ -374,11 +453,19 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 } else {
                     for (k in 0 until e.historySize) {
                         viewport.toCanvas(e.getHistoricalX(i, k), e.getHistoricalY(i, k), tmp)
-                        builder.add(tmp[0], tmp[1], pressure(e, i, k, h), tilt(e, i, k), angle(e, i, k))
+                        feedPoint(tmp[0], tmp[1], pressure(e, i, k, h), tilt(e, i, k), angle(e, i, k), h)
                     }
                     viewport.toCanvas(e.getX(i), e.getY(i), tmp)
-                    builder.add(tmp[0], tmp[1], pressure(e, i, -1, h), tilt(e, i, -1), angle(e, i, -1))
-                    builder.drain()?.let { emitStamps(taper.push(it), h) }
+                    feedPoint(tmp[0], tmp[1], pressure(e, i, -1, h), tilt(e, i, -1), angle(e, i, -1), h)
+                    if (!rulerPending) builder.drain()?.let { emitStamps(taper.push(it), h) }
+                }
+            }
+            Mode.RULER -> {
+                val i = e.findPointerIndex(primaryId)
+                if (i >= 0 && rulerHandle >= 0) {
+                    viewport.toCanvas(e.getX(i), e.getY(i), tmp)
+                    h.ruler.moveHandle(rulerHandle, tmp[0], tmp[1])
+                    h.onRulerChanged()
                 }
             }
             Mode.PICK -> {
@@ -460,6 +547,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     lineMode = false
                     lineBrush = null
                 } else {
+                    // 거의 움직이지 않았으면(점 찍기) 자 없이 그립니다.
+                    if (rulerPending) resolveRuler(h, free = true)
                     builder.finish()
                     builder.drain()?.let { emitStamps(taper.push(it), h) }
                     // 출: 끝이 정해졌으니 획 전체를 끝이 가늘어지게 다시 그립니다.
@@ -600,6 +689,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     }
 
     companion object {
+        /** 자 방향을 정하기 위해 움직여야 하는 거리 (화면 dp) */
+        const val RULER_DECIDE_DP = 10f
         private const val TAP_MS = 280L
         private const val TAP_SLOP = 24f
     }

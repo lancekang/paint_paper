@@ -73,6 +73,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private var tool = Tool.PEN
     private var toolBeforeTemp: Tool? = null
     override val symmetry = Symmetry()
+    override val ruler = kr.dfluid.paint.input.GuideRuler()
+    private lateinit var rulerBtn: ImageView
+    private var rulerPlaced = false
+    override fun onRulerChanged() = overlay.invalidate()
     private lateinit var symBtn: ImageView
     private var straightLineOn = false
     override val straightLine: Boolean get() = straightLineOn
@@ -148,6 +152,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         overlay = OverlayView(this, canvasView.viewport)
         overlay.listener = this
         overlay.stylusSeen = { canvasView.stylusSeen }
+        overlay.ruler = ruler
 
         // 캔버스와 오버레이는 한 번만 붙이고, 둘레 UI(buildChrome)만 테마 바뀔 때 다시 만듭니다.
         rootView = FrameLayout(this)
@@ -313,6 +318,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         updateTitle()
         updateSymmetryButton()
         Ui.setOn(lineBtn, straightLineOn)
+        updateRulerButton()
         onHistoryChanged(lastCanUndo, lastCanRedo)
         layerPanel.update(lastNodes, lastActiveId, lastLiveIds)
         renderer.requestThumbnails()
@@ -386,6 +392,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("그리기 보조")
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
+        rulerBtn = barBtn(R.drawable.ic_ruler_persp, "원근 자 · 동심원 자") { chooseRuler() }
+        updateRulerButton()
         group("앱")
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
         barBtn(R.drawable.ic_keyboard, "단축키 설정") { openShortcutSettings() }
@@ -638,6 +646,48 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         tips.relabel(symBtn, "대칭: ${mode.label} (누르면 다음: ${mode.next().label})")
     }
 
+    /** 자 고르기: 끄기 / 원근 1·2·3점 / 동심원 / 위치 초기화 */
+    private fun chooseRuler() {
+        val items = arrayOf("끄기", "원근 자 · 1점", "원근 자 · 2점", "원근 자 · 3점", "동심원 자", "소실점·중심 위치 초기화")
+        Ui.dialog(this)
+            .setTitle("자")
+            .setItems(items) { _, which ->
+                val v = canvasView.viewport
+                val oldKind = ruler.kind
+                val oldCount = ruler.vpCount
+                when (which) {
+                    0 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.OFF
+                    1, 2, 3 -> { ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE; ruler.vpCount = which }
+                    4 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC
+                    5 -> rulerPlaced = false
+                }
+                // 처음 켤 때, 소실점 개수가 바뀔 때, 초기화를 고를 때 기본 위치로
+                val P = kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE
+                val countChanged = ruler.kind == P && (oldKind != P || oldCount != ruler.vpCount)
+                if (ruler.on && (!rulerPlaced || countChanged)) {
+                    ruler.reset(v.canvasW, v.canvasH)
+                    rulerPlaced = true
+                }
+                updateRulerButton()
+                overlay.invalidate()
+                if (ruler.on) showHud("손잡이를 끌어 옮길 수 있습니다")
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun updateRulerButton() {
+        val circle = ruler.kind == kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC
+        rulerBtn.setImageResource(if (circle) R.drawable.ic_ruler_circle else R.drawable.ic_ruler_persp)
+        Ui.setOn(rulerBtn, ruler.on)
+        val label = when (ruler.kind) {
+            kr.dfluid.paint.input.GuideRuler.Kind.OFF -> "원근 자 · 동심원 자 (꺼짐)"
+            kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE -> "원근 자 ${ruler.vpCount}점 (손잡이를 끌어 소실점 이동)"
+            kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC -> "동심원 자 (손잡이를 끌어 중심 이동)"
+        }
+        tips.relabel(rulerBtn, label)
+    }
+
     private fun toggleStraightLine() {
         straightLineOn = !straightLineOn
         Ui.setOn(lineBtn, straightLineOn)
@@ -847,6 +897,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     override fun onDocumentReplaced(width: Int, height: Int, refit: Boolean) {
+        // 캔버스 크기가 바뀌면 자 위치도 새 캔버스 기준으로
+        if (ruler.on) ruler.reset(width.toFloat(), height.toFloat()) else rulerPlaced = false
         canvasView.onDocumentSize(width, height, refit)
         updateTitle()
     }
