@@ -254,7 +254,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
          * 색 혼합 획. work = 활성 레이어 복사본(캔버스 크기)을 스탬프마다 직접 고칩니다.
          * prev = 대칭 복제본(채널)마다 직전 스탬프 위치.
          */
-        class Smudge(val brush: Brush, val work: RenderTarget, val lock: Boolean) : Op() {
+        class Smudge(val brush: Brush, val work: RenderTarget, val lock: Boolean, val paint: FloatArray? = null) : Op() {
             var rect: IRect? = null
             val prev = HashMap<Int, FloatArray>()
         }
@@ -377,7 +377,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return@post
         }
         if (brush.isBlend) {
-            beginSmudge(n, brush)
+            beginSmudge(n, brush, if (brush.mixMode == Brush.MIX_PAINT) premul(color, 1f) else null)
             return@post
         }
         val tipTex = if (tip != null) ensureTip(tip) else 0
@@ -2612,7 +2612,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     // ---- 색 혼합 ----
 
-    private fun beginSmudge(n: Node, brush: Brush) {
+    private fun beginSmudge(n: Node, brush: Brush, paint: FloatArray? = null) {
         val d = doc ?: return
         if (isMaskEdit(n)) {
             reportError("마스크에는 색 혼합 도구를 쓸 수 없습니다.")
@@ -2624,7 +2624,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         work.bind()
         GlState.off()
         drawSourceCopy(Src.Tiles(s), 1f, IRect(0, 0, d.width, d.height))
-        op = Op.Smudge(brush, work, n.props.alphaLock)
+        op = Op.Smudge(brush, work, n.props.alphaLock, paint)
         if (!n.props.visible) main.post { listener.onRendererError("숨겨진 레이어에 그리고 있습니다.") }
     }
 
@@ -2642,8 +2642,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             o.prev[channel] = floatArrayOf(x, y)
             val mode = o.brush.mixMode
             val drags = mode == Brush.MIX_SMUDGE || mode == Brush.MIX_PUSH
+            val paints = mode == Brush.MIX_PAINT
             // 손끝·밀기는 직전 위치가 있어야 끌고 올 색이 있습니다.
             if (drags && prev == null) continue
+            // 물감은 첫 스탬프부터 칠함 (직전 위치가 없으면 제자리 색과 섞음)
             val px = prev?.get(0) ?: x
             val py = prev?.get(1) ?: y
             // 스탬프 사각형(회전 포함) 반경 + 가져올 범위
@@ -2655,7 +2657,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             val stampRect = IRect.ofBounds(x - reach, y - reach, x + reach, y + reach, d.width, d.height) ?: continue
             var src = IRect.ofBounds(x - reach - extra, y - reach - extra, x + reach + extra, y + reach + extra, d.width, d.height) ?: continue
-            if (drags) {
+            if (drags || paints) {
                 IRect.ofBounds(px - reach, py - reach, px + reach, py + reach, d.width, d.height)?.let { src = src.union(it) }
             }
             val patch = ensurePatch(src.w, src.h)
@@ -2673,7 +2675,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             o.work.bind()
             GlState.scissor(stampRect)
             GlState.off()
-            brushEngine.drawSmudge(o.work, stamps, i, o.brush, patch, src.x, src.y, px - x, py - y, sel, o.lock)
+            brushEngine.drawSmudge(o.work, stamps, i, o.brush, patch, src.x, src.y, px - x, py - y, sel, o.lock, o.paint)
             GlState.noScissor()
             o.rect = stampRect.union(o.rect)
             markDirty(stampRect)

@@ -95,7 +95,7 @@ object BrushEditor {
                 row.addView(bt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 3f) })
             }
             root.addView(row)
-            root.addView(Ui.text(ctx, "손끝 = 지나온 색을 끌고 감, 흐리기 = 둘레와 섞음, 밀기·부풀리기·오므리기 = 그림 모양을 바꿈 (유동화)", 11f, Ui.SUBTEXT))
+            root.addView(Ui.text(ctx, "손끝 = 지나온 색을 끌고 감, 흐리기 = 둘레와 섞음, 밀기·부풀리기·오므리기 = 그림 모양을 바꿈 (유동화), 물감 = 주색을 칠하며 캔버스 색과 섞음 (흐름 = 물감 양)", 11f, Ui.SUBTEXT))
         }
         param(if (b.isBlend) "강도" else "불투명도", 0.01f, 1f, { b.opacity }, { b.opacity = it }, pct)
         param("흐름", 0.01f, 1f, { b.flow }, { b.flow = it }, pct)

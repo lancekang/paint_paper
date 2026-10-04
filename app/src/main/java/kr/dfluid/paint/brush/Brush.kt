@@ -141,7 +141,9 @@ data class Brush(
         const val MIX_PUSH = 2
         const val MIX_BLOAT = 3
         const val MIX_PINCH = 4
-        val MIX_LABELS = listOf("손끝", "흐리기", "밀기", "부풀리기", "오므리기")
+        /** 물감 혼합: 주색을 칠하면서 지나온 색과 섞음 (흐름 = 물감 양) */
+        const val MIX_PAINT = 5
+        val MIX_LABELS = listOf("손끝", "흐리기", "밀기", "부풀리기", "오므리기", "물감")
 
         fun fromJson(o: JSONObject): Brush? {
             val tool = Tool.entries.firstOrNull { it.name == o.optString("tool") } ?: return null
@@ -175,7 +177,7 @@ data class Brush(
                 curve = curve,
                 taperIn = f("taperIn", 0f).coerceIn(0f, TAPER_MAX),
                 taperOut = f("taperOut", 0f).coerceIn(0f, TAPER_MAX),
-                mixMode = o.optInt("mixMode", base.mixMode).coerceIn(MIX_SMUDGE, MIX_PINCH),
+                mixMode = o.optInt("mixMode", base.mixMode).coerceIn(MIX_SMUDGE, MIX_PAINT),
             )
         }
     }
@@ -224,6 +226,14 @@ object BrushPresets {
         )
     }
 
+    /** 물감 혼합 보조 도구 (색 혼합 도구 안) */
+    fun paintPresets(): List<Brush> = create(Tool.BLEND).let { b ->
+        listOf(
+            b.copy(id = id(), name = "물감 붓", size = 50f, opacity = 0.9f, flow = 0.5f, hardness = 0.6f, spacing = 0.08f, pressureSize = 0.6f, pressureOpacity = 0.6f, mixMode = Brush.MIX_PAINT),
+            b.copy(id = id(), name = "진한 물감", size = 40f, opacity = 1f, flow = 0.8f, hardness = 0.8f, spacing = 0.08f, pressureSize = 0.5f, pressureOpacity = 0.3f, mixMode = Brush.MIX_PAINT),
+        )
+    }
+
     /** 유동화 보조 도구 (색 혼합 도구 안) */
     fun liquifyPresets(): List<Brush> = create(Tool.BLEND).let { b ->
         listOf(
@@ -259,7 +269,7 @@ object BrushPresets {
             create(tool),
             create(tool).copy(id = id(), name = "색 늘이기", opacity = 1f, hardness = 0.6f, pressureOpacity = 0.4f),
             create(tool).copy(id = id(), name = "흐리기", size = 60f, opacity = 0.6f, hardness = 0f, mixMode = Brush.MIX_BLUR),
-        ) + liquifyPresets()
+        ) + paintPresets() + liquifyPresets()
         Tool.ERASER -> listOf(
             create(tool),
             create(tool).copy(id = id(), name = "부드러움", hardness = 0f, size = 120f, pressureSize = 0f, pressureOpacity = 1f, flow = 0.3f, buildUp = true),

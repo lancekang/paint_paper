@@ -99,6 +99,7 @@ class BrushEngine {
     fun drawSmudge(
         target: RenderTarget, stamps: FloatArray, index: Int, brush: Brush,
         patch: RenderTarget, ox: Int, oy: Int, shiftX: Float, shiftY: Float, selTex: Int, lock: Boolean,
+        paint: FloatArray? = null,
     ) {
         ensureCapacity(1)
         buffer.clear()
@@ -119,6 +120,9 @@ class BrushEngine {
         GLES20.glUniform2f(p.u("u_psize"), patch.width.toFloat(), patch.height.toFloat())
         GLES20.glUniform2f(p.u("u_shift"), shiftX, shiftY)
         GLES20.glUniform2f(p.u("u_center"), stamps[index * StrokeBuilder.FLOATS], stamps[index * StrokeBuilder.FLOATS + 1])
+        val pc = paint ?: floatArrayOf(0f, 0f, 0f, 0f)
+        GLES20.glUniform4f(p.u("u_paint"), pc[0], pc[1], pc[2], pc[3])
+        GLES20.glUniform1f(p.u("u_load"), brush.flow)
         GLES20.glUniform1i(p.u("u_mode"), brush.mixMode)
         GLES20.glUniform1f(p.u("u_strength"), brush.opacity)
         GLES20.glUniform1f(p.u("u_blurR"), stamps[index * StrokeBuilder.FLOATS + 2] * 0.5f)

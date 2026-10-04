@@ -155,8 +155,13 @@ class BrushLibrary(context: Context) {
         }
         // 예전 저장본에는 유동화 보조 도구가 없으므로 한 번만 넣어 줌
         if (rev < 1) {
-            presets[Tool.BLEND]?.let { l -> if (l.none { it.mixMode >= Brush.MIX_PUSH }) l.addAll(BrushPresets.liquifyPresets()) }
+            presets[Tool.BLEND]?.let { l -> if (l.none { it.mixMode in Brush.MIX_PUSH..Brush.MIX_PINCH }) l.addAll(BrushPresets.liquifyPresets()) }
             rev = 1
+            save()
+        }
+        if (rev < 2) {
+            presets[Tool.BLEND]?.let { l -> if (l.none { it.mixMode == Brush.MIX_PAINT }) l.addAll(0, BrushPresets.paintPresets()) }
+            rev = 2
             save()
         }
     }

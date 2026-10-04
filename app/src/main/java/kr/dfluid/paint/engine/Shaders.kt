@@ -375,6 +375,8 @@ uniform sampler2D u_sel;
 uniform int u_useSel;
 uniform int u_lock;
 uniform vec2 u_center;
+uniform vec4 u_paint;
+uniform float u_load;
 out vec4 o;
 void main() {
     vec2 uv = (v_canvasPos - u_origin) / u_psize;
@@ -387,7 +389,7 @@ void main() {
     if (u_useSel == 1) k *= texture(u_sel, v_canvasPos / u_canvas).r;
     vec4 src;
     vec4 outc;
-    if (u_mode >= 2) {
+    if (u_mode >= 2 && u_mode <= 4) {
         // 유동화: 섞지 않고 픽셀을 옮김 (k만큼 다른 자리에서 가져옴)
         vec2 q;
         if (u_mode == 2) q = v_canvasPos + u_shift * k;
@@ -403,6 +405,9 @@ void main() {
     }
     if (u_mode == 0) {
         src = texture(u_patch, uv + u_shift / u_psize);
+    } else if (u_mode == 5) {
+        // 물감 혼합: 주색(u_paint)을 u_load만큼, 나머지는 지나온 자리의 색
+        src = mix(texture(u_patch, uv + u_shift / u_psize), u_paint, u_load);
     } else {
         src = cur;
         for (int i = 0; i < 12; i++) {
