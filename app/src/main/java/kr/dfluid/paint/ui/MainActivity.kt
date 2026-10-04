@@ -539,7 +539,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         tools.addView(toolToggle, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 26f)).apply { bottomMargin = Ui.dp(ctx, 2f) })
         val toolBodyStart = tools.childCount
         val groups = listOf(
-            listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER, Tool.BLEND),
+            listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER, Tool.BLEND, Tool.LINEFIX),
             listOf(Tool.SELECT, Tool.MOVE),
             listOf(Tool.FILL, Tool.GRADIENT, Tool.SHAPE, Tool.TEXT),
             listOf(Tool.EYEDROPPER, Tool.HAND),
@@ -1164,6 +1164,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.MARKER -> R.drawable.ic_tool_marker
         Tool.ERASER -> R.drawable.ic_tool_eraser
         Tool.BLEND -> R.drawable.ic_tool_blend
+        Tool.LINEFIX -> R.drawable.ic_tool_linefix
         Tool.SHAPE -> R.drawable.ic_tool_shape
         Tool.TEXT -> R.drawable.ic_tool_text
         Tool.SELECT -> R.drawable.ic_tool_select
@@ -1181,6 +1182,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.MARKER -> Action.TOOL_MARKER
         Tool.ERASER -> Action.TOOL_ERASER
         Tool.BLEND -> Action.TOOL_BLEND
+        Tool.LINEFIX -> Action.TOOL_LINEFIX
         Tool.SHAPE -> Action.TOOL_SHAPE
         Tool.TEXT -> Action.TOOL_TEXT
         Tool.SELECT -> Action.TOOL_SELECT
@@ -2003,6 +2005,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.TOOL_MARKER -> Tool.MARKER
             Action.TOOL_ERASER -> Tool.ERASER
             Action.TOOL_BLEND -> Tool.BLEND
+            Action.TOOL_LINEFIX -> Tool.LINEFIX
             Action.TOOL_SHAPE -> Tool.SHAPE
             Action.TOOL_TEXT -> Tool.TEXT
             Action.TOOL_EYEDROPPER -> Tool.EYEDROPPER

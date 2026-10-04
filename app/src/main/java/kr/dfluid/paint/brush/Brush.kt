@@ -11,6 +11,8 @@ enum class Tool(val label: String, val short: String, val isBrush: Boolean) {
     MARKER("마커", "마커", true),
     ERASER("지우개", "지우개", true),
     BLEND("색 혼합", "혼합", true),
+    /** 선 굵기 수정 (벡터 레이어): mixMode 0 = 굵게, 1 = 가늘게 */
+    LINEFIX("선 굵기 수정", "선 수정", true),
     /** 도형: 브러시 프리셋(선 굵기 등)을 쓰지만 드래그로 직선·사각형·타원을 그립니다 */
     SHAPE("도형", "도형", true),
     SELECT("선택", "선택", false),
@@ -208,6 +210,10 @@ object BrushPresets {
             id(), tool, "도형 선", size = 6f, opacity = 1f, flow = 1f, hardness = 0.9f, spacing = 0.05f,
             pressureSize = 0f, pressureOpacity = 0f, minSizeRatio = 1f,
         )
+        Tool.LINEFIX -> Brush(
+            id(), tool, "굵게", size = 40f, opacity = 1f, flow = 1f, hardness = 0.5f, spacing = 0.15f,
+            pressureSize = 0.3f, pressureOpacity = 0f, minSizeRatio = 0.6f, mixMode = 0,
+        )
         Tool.BLEND -> Brush(
             id(), tool, "손끝", size = 40f, opacity = 0.8f, flow = 1f, hardness = 0.3f, spacing = 0.12f,
             pressureSize = 0.5f, pressureOpacity = 1f, minSizeRatio = 0.5f, mixMode = Brush.MIX_SMUDGE,
@@ -243,6 +249,7 @@ object BrushPresets {
             create(tool).copy(id = id(), name = "강하게", flow = 0.15f, hardness = 0.3f),
         )
         Tool.MARKER -> listOf(create(tool))
+        Tool.LINEFIX -> listOf(create(tool), create(tool).copy(id = id(), name = "가늘게", mixMode = 1))
         Tool.SHAPE -> listOf(
             create(tool),
             create(tool).copy(id = id(), name = "굵은 선", size = 16f),

@@ -245,7 +245,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
 
         /** 벡터 지우개: 닿은 선을 통째로 지움. saved = 처음 바꾸기 전 타일 */
-        class VErase(val layerId: Int, val before: List<VStroke>) : Op() {
+        class VErase(val layerId: Int, val before: List<VStroke>, val fix: Float = 0f) : Op() {
             var current: List<VStroke> = before
             val saved = HashMap<Int, ByteBuffer?>()
         }
@@ -362,6 +362,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             op = Op.VErase(n.id, vectors[n.id] ?: emptyList())
             return@post
         }
+        if (brush.tool == kr.dfluid.paint.brush.Tool.LINEFIX) {
+            if (!onVector) {
+                reportError("선 굵기 수정은 벡터 레이어에서만 쓸 수 있습니다.")
+                return@post
+            }
+            // 한 번 스칠 때마다 닿은 부분이 이만큼씩 굵어지거나 가늘어짐
+            op = Op.VErase(n.id, vectors[n.id] ?: emptyList(), if (brush.mixMode == 1) -0.07f else 0.07f)
+            return@post
+        }
         if (onVector && (hasSelection || n.props.alphaLock)) {
             // 선 데이터에는 선택·잠금 잘림이 남지 않아, 나중에 다시 그리면 잘린 부분이 되살아남
             reportError("벡터 레이어에는 선택 영역이나 투명 픽셀 잠금 안에서 그릴 수 없습니다. 선택을 해제하거나 래스터화하세요.")
@@ -381,7 +390,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** [channel] = 대칭 복제본 번호 (0 = 원본). 색 혼합이 복제본마다 직전 위치를 따로 기억합니다. */
     fun addStamps(stamps: FloatArray, channel: Int = 0) = post {
         (op as? Op.Smudge)?.let { smudgeStamps(it, stamps, channel); return@post }
-        (op as? Op.VErase)?.let { vectorErase(it, stamps); return@post }
+        (op as? Op.VErase)?.let { if (it.fix != 0f) vectorFix(it, stamps) else vectorErase(it, stamps); return@post }
         val o = op as? Op.Stroke ?: return@post
         val d = doc ?: return@post
         o.all.add(stamps.copyOf())
@@ -2736,6 +2745,51 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 지우개 스탬프에 닿은 선을 지우고, 그 선들이 있던 영역을 남은 선으로 다시 그립니다. */
+    /** 선 굵기 수정: 브러시 안에 들어온 선 스탬프의 반지름을 가까울수록 많이 바꿉니다. */
+    private fun vectorFix(o: Op.VErase, stamps: FloatArray) {
+        val d = doc ?: return
+        val s = surfaces[o.layerId] ?: return
+        val cur = o.current
+        if (cur.isEmpty()) return
+        val f = StrokeBuilder.FLOATS
+        var area: IRect? = null
+        var changed = false
+        val next = ArrayList<VStroke>(cur.size)
+        for (v in cur) {
+            var st: FloatArray? = null
+            var k = 0
+            while (k + 2 < v.stamps.size) {
+                val x = v.stamps[k]; val y = v.stamps[k + 1]
+                var best = 0f
+                var i = 0
+                while (i + 2 < stamps.size) {
+                    val rr = stamps[i + 2]
+                    val dx = stamps[i] - x; val dy = stamps[i + 1] - y
+                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                    if (dist < rr) best = max(best, 1f - dist / rr)
+                    i += f
+                }
+                if (best > 0f) {
+                    val out = st ?: v.stamps.copyOf().also { st = it }
+                    out[k + 2] = (out[k + 2] * (1f + o.fix * best)).coerceIn(0.3f, 400f)
+                }
+                k += f
+            }
+            val ns = st
+            if (ns != null) {
+                val nv = VStroke(ns, v.brush, v.color, v.fill)
+                for (b in listOf(v.bounds, nv.bounds)) IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height)?.let { area = it.union(area) }
+                next.add(nv)
+                changed = true
+            } else next.add(v)
+        }
+        val a = area ?: return
+        if (!changed) return
+        o.current = next
+        vectors[o.layerId] = next
+        rasterStrokes(d, s, a, next, o.saved)
+    }
+
     private fun vectorErase(o: Op.VErase, stamps: FloatArray) {
         val d = doc ?: return
         val s = surfaces[o.layerId] ?: return

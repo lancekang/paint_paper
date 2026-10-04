@@ -176,6 +176,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
         val size = Ui.SliderRow(ctx, "크기", 1000)
         val op = Ui.SliderRow(ctx, if (tool == Tool.BLEND) "강도" else "불투명도", 100)
+        if (tool == Tool.LINEFIX) view.addView(hint("벡터 레이어의 선을 문지르면 닿은 부분이 굵어지거나(굵게) 가늘어집니다(가늘게). 여러 번 문지를수록 더 바뀝니다."), lp(4f))
         val hard = Ui.SliderRow(ctx, "경도", 100)
         val smooth = Ui.SliderRow(ctx, "손떨림 보정", 100)
         val tIn = Ui.SliderRow(ctx, "입 (시작)", Brush.TAPER_MAX.toInt())
