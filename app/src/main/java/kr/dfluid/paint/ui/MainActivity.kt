@@ -751,6 +751,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         sbBtn(R.drawable.ic_tool_fill, "주색으로 채우기", Action.FILL_SELECTION) { onShortcut(Action.FILL_SELECTION) }
         sbBtn(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM) { onShortcut(Action.TRANSFORM) }
         sbBtn(R.drawable.ic_quick_mask, "퀵 마스크", Action.SELECT_QUICK_MASK) { onShortcut(Action.SELECT_QUICK_MASK) }
+        sbText("컷", "컷 나누기: 선택 범위로 컷 폴더 만들기 (컷 영역 + 클리핑된 그림 + 테두리)", null) { chooseFrame() }
         selBar = sb
         root.addView(selBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
             bottomMargin = Ui.dp(ctx, 16f)
@@ -1429,6 +1430,20 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onSelectionChanged(hasSelection: Boolean) {
         this.hasSelection = hasSelection
         updateSelBar()
+    }
+
+    /** 컷 테두리 굵기를 고르고 만들기 */
+    private fun chooseFrame() {
+        val widths = intArrayOf(4, 8, 12, 20)
+        Ui.dialog(this)
+            .setTitle("컷 테두리 굵기")
+            .setItems(widths.map { "${it}px" }.toTypedArray()) { _, i ->
+                renderer.createFrame(widths[i].toFloat())
+                renderer.deselect()
+                showHud("컷을 만들었습니다. \"그림\" 레이어에 그리면 컷 밖으로 나가지 않습니다")
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun updateSelBar() {

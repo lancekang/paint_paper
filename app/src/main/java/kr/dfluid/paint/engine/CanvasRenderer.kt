@@ -1013,6 +1013,82 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         markAllDirty()
     }
 
+    /**
+     * 컷 나누기: 선택 영역의 경계 사각형으로 "컷" 폴더를 만듭니다.
+     * 아래부터 흰 "컷 영역" → 거기에 클리핑된 "그림"(활성) → 검은 "테두리". 실행취소 한 단계.
+     */
+    fun createFrame(border: Float) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val rect = selBounds?.takeIf { hasSelection } ?: run {
+            reportError("먼저 선택 도구로 컷 범위를 정하세요 (사각형 선택).")
+            return@post
+        }
+        val rf = android.graphics.RectF(rect.x.toFloat(), rect.y.toFloat(), rect.right.toFloat(), rect.bottom.toFloat())
+        val fill = shapeTiles(d, rect) { c ->
+            c.drawRect(rf, android.graphics.Paint().apply { color = Color.WHITE })
+        }
+        val half = border / 2f
+        val line = shapeTiles(d, rect) { c ->
+            c.drawRect(rf.left + half, rf.top + half, rf.right - half, rf.bottom - half, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = border
+                strokeJoin = android.graphics.Paint.Join.MITER
+            })
+        }
+        var areaId = 0
+        var lineId = 0
+        structural { doc ->
+            val a = doc.active
+            val parent = a?.parent ?: doc.root
+            val idx = if (a != null) a.index + 1 else parent.children.size
+            val names = doc.allNodes().map { it.props.name }.toSet()
+            var k = 1
+            while ("컷 $k" in names) k++
+            val folder = Node(doc.newId(), NodeKind.FOLDER, LayerProps("컷 $k", blend = BlendMode.PASS_THROUGH))
+            val area = Node(doc.newId(), NodeKind.RASTER, LayerProps("컷 영역"))
+            val paint = Node(doc.newId(), NodeKind.RASTER, LayerProps("그림", clip = true))
+            val frame = Node(doc.newId(), NodeKind.RASTER, LayerProps("테두리"))
+            insert(parent, idx, folder)
+            insert(folder, 0, area)
+            insert(folder, 1, paint)
+            insert(folder, 2, frame)
+            areaId = area.id
+            lineId = frame.id
+            paint.id
+        }
+        // 새 레이어들에 픽셀 (실행취소하면 StructureCommand가 보관·복원)
+        surfaces[areaId]?.let { s -> if (s.tileCount == 0) fill.forEach { (k, b) -> s.write(k, b) } }
+        surfaces[lineId]?.let { s -> if (s.tileCount == 0) line.forEach { (k, b) -> s.write(k, b) } }
+        thumbQueue.add(areaId); thumbQueue.add(lineId)
+        belowValid = false
+        markAllDirty()
+    }
+
+    /** [area]와 겹치는 타일마다 [draw](캔버스 좌표계)를 그려 비어 있지 않은 타일만 돌려줍니다. */
+    private fun shapeTiles(d: Document, area: IRect, draw: (android.graphics.Canvas) -> Unit): Map<Int, ByteBuffer> {
+        val out = HashMap<Int, ByteBuffer>()
+        val cols = TileMath.cols(d.width)
+        val tile = Bitmap.createBitmap(TILE, TILE, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(tile)
+        val tx0 = max(0, area.x / TILE); val ty0 = max(0, area.y / TILE)
+        val tx1 = min(cols - 1, (area.right - 1) / TILE); val ty1 = min(TileMath.rows(d.height) - 1, (area.bottom - 1) / TILE)
+        for (ty in ty0..ty1) for (tx in tx0..tx1) {
+            tile.eraseColor(0)
+            c.save()
+            c.translate(-(tx * TILE).toFloat(), -(ty * TILE).toFloat())
+            draw(c)
+            c.restore()
+            val buf = GlUtil.byteBuffer(TILE_BYTES)
+            tile.copyPixelsToBuffer(buf)
+            buf.rewind()
+            if (!TileMath.isEmpty(buf)) out[ty * cols + tx] = buf
+        }
+        tile.recycle()
+        return out
+    }
+
     /** 텍스트 레이어 [id]의 내용을 [spec]으로 바꿉니다 (픽셀 + 속성을 한 번의 실행취소로). */
     fun updateText(id: Int, spec: TextSpec) = post {
         finishOp()
