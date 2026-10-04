@@ -125,6 +125,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // ---- 내비게이터 ----
     private lateinit var colorSliders: ColorSliders
     private lateinit var grayBtn: ImageView
+    private lateinit var gridBtn: ImageView
     // ---- 퀵 액세스 ----
     private lateinit var quickPanel: LinearLayout
     private lateinit var quickGrid: LinearLayout
@@ -467,6 +468,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         act(R.drawable.ic_view_fit, "화면에 맞춤", Action.VIEW_FIT)
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
         act(R.drawable.ic_view_flip, "화면 좌우 반전", Action.VIEW_FLIP)
+        gridBtn = act(R.drawable.ic_grid, "격자 표시 (간격 고르기)", Action.VIEW_GRID)
+        Ui.setOn(gridBtn, settings.gridStep > 0)
+        overlay.gridStep = settings.gridStep
         grayBtn = act(R.drawable.ic_view_gray, "흑백 보기 (명암 확인, 그림은 그대로)", Action.VIEW_GRAY)
         Ui.setOn(grayBtn, renderer.grayView)
         subBtn = barBtn(R.drawable.ic_subview, "서브 뷰 (참고 이미지 창)") { toggleSubView() }
@@ -1224,6 +1228,20 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         if (::navView.isInitialized && settings.navOpen) navView.setImage(bitmap) else bitmap.recycle()
     }
 
+    private fun chooseGrid() {
+        val steps = intArrayOf(0, 32, 64, 100, 128, 256)
+        Ui.dialog(this)
+            .setTitle("격자")
+            .setItems(steps.map { if (it == 0) "끄기" else "${it}px" }.toTypedArray()) { _, i ->
+                settings.gridStep = steps[i]
+                settings.save()
+                overlay.gridStep = steps[i]
+                Ui.setOn(gridBtn, steps[i] > 0)
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
     private fun toggleQuick() {
         settings.quickOpen = !settings.quickOpen
         settings.save()
@@ -1931,6 +1949,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.VIEW_ROTATE_RIGHT -> { v.rotateCentered(ROTATE_STEP); canvasView.pushView(); showHud("${v.rotationDegrees}°") }
             Action.VIEW_ROTATE_RESET -> { v.resetRotation(); canvasView.pushView() }
             Action.VIEW_FLIP -> { v.toggleFlip(); canvasView.pushView(); showHud(if (v.flipped) "좌우 반전" else "반전 해제") }
+            Action.VIEW_GRID -> chooseGrid()
             Action.VIEW_GRAY -> {
                 renderer.grayView = !renderer.grayView
                 if (::grayBtn.isInitialized) Ui.setOn(grayBtn, renderer.grayView)

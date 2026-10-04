@@ -48,6 +48,8 @@ class AppSettings(context: Context) {
     var animFps = 12
     /** 서브 뷰 (참고 이미지 창) */
     var subOpen = false
+    /** 격자 간격 (px, 0 = 끔) */
+    var gridStep = 0
     /** 퀵 액세스: 담아 둔 동작 이름 (Action.name) */
     val quickActions = arrayListOf("UNDO", "REDO", "TOOL_PEN", "TOOL_ERASER", "SELECT_NONE", "TRANSFORM")
     var quickOpen = false
@@ -140,6 +142,7 @@ class AppSettings(context: Context) {
         selLauncher = prefs.getBoolean("selLauncher", true)
         navOpen = prefs.getBoolean("navOpen", false)
         quickOpen = prefs.getBoolean("quickOpen", false)
+        gridStep = prefs.getInt("gridStep", 0).coerceIn(0, 2000)
         quickFx = prefs.getFloat("quickFx", 0f)
         quickFy = prefs.getFloat("quickFy", 1f)
         prefs.getString("quickActions", null)?.let { q ->
@@ -227,6 +230,7 @@ class AppSettings(context: Context) {
             .putBoolean("selLauncher", selLauncher)
             .putBoolean("navOpen", navOpen)
             .putBoolean("quickOpen", quickOpen)
+            .putInt("gridStep", gridStep)
             .putFloat("quickFx", quickFx)
             .putFloat("quickFy", quickFy)
             .putString("quickActions", quickActions.joinToString(","))

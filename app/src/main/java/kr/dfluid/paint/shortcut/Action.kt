@@ -173,6 +173,7 @@ enum class Action(val label: String, val category: String, val kind: ActionKind,
     VIEW_ROTATE_RIGHT("오른쪽으로 15° 회전", "보기", ActionKind.REPEAT, listOf(k(KeyEvent.KEYCODE_6))),
     VIEW_ROTATE_RESET("회전 초기화", "보기", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_5))),
     VIEW_FLIP("좌우 반전 보기", "보기", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_H, shift = true))),
+    VIEW_GRID("격자 표시", "보기", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_APOSTROPHE, ctrl = true))),
     VIEW_GRAY("흑백 보기 (명암 확인)", "보기", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_G, ctrl = true, shift = true))),
     TOGGLE_UI("UI 숨기기/보이기", "보기", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_TAB))),
 

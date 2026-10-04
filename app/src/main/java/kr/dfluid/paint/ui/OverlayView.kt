@@ -434,7 +434,41 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     // 그리기
     // =====================================================================
 
+    /** 격자 간격 (캔버스 px, 0 = 끔). 4칸마다 진한 선 */
+    var gridStep = 0
+        set(v) { field = v; invalidate() }
+    private val gridMinor = Paint().apply { color = 0x2A3D8BFF; strokeWidth = 1f }
+    private val gridMajor = Paint().apply { color = 0x553D8BFF; strokeWidth = 1.5f }
+
+    /** 캔버스 안에만 격자. 화면에서 선 간격이 6px보다 좁으면 진한 선만 */
+    private fun drawGrid(canvas: Canvas) {
+        val step = gridStep.toFloat()
+        val w = viewport.canvasW
+        val h = viewport.canvasH
+        val dense = step * viewport.scale >= 6f
+        val a = FloatArray(2); val b = FloatArray(2)
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) {
+            viewport.toScreen(x0, y0, a); viewport.toScreen(x1, y1, b)
+            canvas.drawLine(a[0], a[1], b[0], b[1], p)
+        }
+        var i = 0
+        var x = 0f
+        while (x <= w) {
+            val major = i % 4 == 0
+            if (major || dense) line(x, 0f, x, h, if (major) gridMajor else gridMinor)
+            x += step; i++
+        }
+        i = 0
+        var y = 0f
+        while (y <= h) {
+            val major = i % 4 == 0
+            if (major || dense) line(0f, y, w, y, if (major) gridMajor else gridMinor)
+            y += step; i++
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
+        if (gridStep > 0) drawGrid(canvas)
         layoutGuideX?.let { canvas.drawLine(it, 0f, it, height.toFloat(), layoutGuide) }
         layoutGuideY?.let { canvas.drawLine(0f, it, width.toFloat(), it, layoutGuide) }
         if (symMode != SymMode.OFF) drawSymmetry(canvas)
