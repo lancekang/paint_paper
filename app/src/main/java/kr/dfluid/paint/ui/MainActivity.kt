@@ -678,9 +678,16 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         updateTitle()
     }
 
+    private var lastMaskEditing = false
+
     override fun onLayersChanged(nodes: List<NodeInfo>, activeId: Int, liveRasterIds: Set<Int>) {
         lastNodes = nodes
         lastActiveId = activeId
+        val maskEditing = renderer.maskEditing && nodes.firstOrNull { it.id == activeId }?.props?.mask == true
+        if (maskEditing != lastMaskEditing) {
+            lastMaskEditing = maskEditing
+            showHud(if (maskEditing) "마스크 편집 · 그리기 = 보이기, 지우개 = 가리기" else "레이어 편집")
+        }
         layerPanel.update(nodes, activeId, liveRasterIds)
         updateTitle()
     }

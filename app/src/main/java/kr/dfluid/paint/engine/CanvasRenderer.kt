@@ -92,6 +92,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     @Volatile var hasSelection = false
         private set
     val perf = PerfMonitor()
+    /** 활성 레이어의 마스크를 편집 중 (활성 레이어에 마스크가 있을 때만 의미 있음). UI는 읽기만. */
+    @Volatile var maskEditing = false
+        private set
+    /** 마스크 적용용 임시 버퍼 (캔버스 크기, 필요할 때 만듦) */
+    private var maskTmp: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
     /** 앱 첫 실행 시 기본 캔버스의 배경색 (null = 투명). */
@@ -483,16 +488,91 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // UI 스레드 API — 레이어
     // =====================================================================
 
-    fun selectNode(id: Int) = post {
+    /** [mask] = true면 그 레이어의 마스크를 편집 대상으로 (마스크가 있을 때만). */
+    fun selectNode(id: Int, mask: Boolean = false) = post {
         val d = doc ?: return@post
-        if (d.find(id) != null && id != d.activeId) {
+        val n = d.find(id) ?: return@post
+        val wantMask = mask && n.isRaster && n.props.mask
+        if (id != d.activeId || wantMask != maskEditing) {
             finishOp()
-            d.activeId = id
-            belowValid = false
-            markAllDirty()
+            if (id != d.activeId) {
+                d.activeId = id
+                belowValid = false
+                markAllDirty()
+            }
+            maskEditing = wantMask
             notifyLayers()
         }
     }
+
+    // ---- 레이어 마스크 ----
+
+    /** 활성 레이어에 빈 마스크(전부 보임)를 만들고 마스크 편집으로 들어갑니다. */
+    fun addMask() = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = editableActive() ?: return@post
+        if (n.props.mask) {
+            maskEditing = true
+            notifyLayers()
+            return@post
+        }
+        val before = d.shape()
+        n.props = n.props.copy(mask = true, maskEnabled = true)
+        val cmd = StructureCommand(before, d.shape(), n.id, n.id)
+        cmd.redo(this) // applyShape가 surfaces[-id]를 만듭니다
+        history.push(cmd)
+        maskEditing = true
+        afterEdit()
+    }
+
+    /** 마스크 삭제 (실행취소하면 마스크 픽셀도 돌아옵니다). */
+    fun deleteMask() = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = d.activeRaster?.takeIf { it.props.mask } ?: return@post
+        val before = d.shape()
+        n.props = n.props.copy(mask = false)
+        val cmd = StructureCommand(before, d.shape(), n.id, n.id)
+        cmd.redo(this) // 마스크 픽셀은 cmd 안에 보관
+        history.push(cmd)
+        maskEditing = false
+        afterEdit()
+    }
+
+    /** 마스크를 레이어 픽셀에 합치고(가린 부분을 실제로 지움) 마스크를 없앱니다. */
+    fun applyMask() = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = d.activeRaster?.takeIf { it.props.mask } ?: return@post
+        val s = surfaces[n.id] ?: return@post
+        val m = surfaces[-n.id]
+        val saved = HashMap<Int, ByteBuffer?>()
+        if (m != null && n.props.maskEnabled) {
+            for ((key, mt) in m.tiles) {
+                val lt = s.tiles[key] ?: continue
+                saved[key] = s.read(key)
+                s.bindLocal(lt)
+                GlState.erase()
+                compositor.drawCopy(mt.tex, 1f)
+                GlState.off()
+                s.dropIfEmpty(key)
+            }
+        }
+        val before = d.shape()
+        n.props = n.props.copy(mask = false)
+        val struct = StructureCommand(before, d.shape(), n.id, n.id)
+        struct.redo(this)
+        history.push(if (saved.isEmpty()) struct else CompoundCommand(listOf(TilesCommand(n.id, saved), struct)))
+        thumbQueue.add(n.id)
+        maskEditing = false
+        afterEdit()
+    }
+
+    /** 마스크 편집 중이면 마스크 surface id(-id), 아니면 레이어 id. */
+    private fun editId(n: Node): Int = if (maskEditing && n.props.mask) -n.id else n.id
+
+    private fun isMaskEdit(n: Node): Boolean = maskEditing && n.props.mask
 
     /** delta = +1 위 레이어, -1 아래 레이어 (화면 목록 기준) */
     fun selectAdjacent(delta: Int) = post {
@@ -503,6 +583,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (i >= 0 && j in list.indices) {
             finishOp()
             d.activeId = list[j].id
+            maskEditing = false
             belowValid = false
             markAllDirty()
             notifyLayers()
@@ -640,6 +721,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             main.post { listener.onRendererError("숨긴 레이어는 병합할 수 없습니다.") }
             return@post
         }
+        if (a.props.mask && a.props.maskEnabled) {
+            main.post { listener.onRendererError("마스크가 있는 레이어는 먼저 마스크를 적용하거나 삭제한 뒤 병합하세요.") }
+            return@post
+        }
         val up = surfaces[a.id]!!
         val low = surfaces[below.id]!!
         val preserve = a.props.clip
@@ -681,7 +766,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         finishOp()
         val d = doc ?: return@post
         val n = editableActive() ?: return@post
-        if (hasSelection) {
+        if (hasSelection || isMaskEdit(n)) {
+            // 마스크에서 "지우기" = 가리기 (선택이 없으면 전체)
             val (tex, rect) = selectionCoverage(d) ?: return@post
             commitCoverage(tex, floatArrayOf(1f, 1f, 1f, 1f), 1f, rect, eraser = true, useSel = false)
         } else {
@@ -1049,6 +1135,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     val s = TileSurface(w, h, pool)
                     newSurfaces[n.id] = s
                     n.tiles?.let { s.loadCpu(it) }
+                    if (n.props.mask) {
+                        val m = TileSurface(w, h, pool)
+                        newSurfaces[-n.id] = m
+                        n.maskTiles?.let { m.loadCpu(it) }
+                    }
                 }
             }
             sb = rt(true); sel = rt(true); pv = rt(); below = rt(); ca = rt(); cb = rt()
@@ -1091,6 +1182,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         pool.clearFree()
         strokeBuf?.release(); selTex?.release(); preview?.release(); belowCache?.release()
         tileTmp?.release(); thumbTarget?.release()
+        maskTmp?.release(); maskTmp = null
+        maskEditing = false
         pairs.forEach { it.release() }
         pairs.clear()
         (op as? Op.Transform)?.floating?.release()
@@ -1109,13 +1202,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         tips.clear()
         strokeBuf = null; selTex = null; preview = null; belowCache = null; compResult = null
         tileTmp = null; thumbTarget = null
+        maskTmp = null
         op = null
         doc = null
     }
 
     private fun captureData(d: Document): DocumentData = DocumentData(
         d.width, d.height, d.activeId,
-        d.shape().map { e -> NodeData(e.id, e.kind, e.props, e.parentId, surfaces[e.id]?.toCpu()) }
+        d.shape().map { e ->
+            NodeData(e.id, e.kind, e.props, e.parentId, surfaces[e.id]?.toCpu(), if (e.props.mask) surfaces[-e.id]?.toCpu() else null)
+        }
     )
 
     private fun clearSelectionState() {
@@ -1218,8 +1314,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private fun commitToActive(rect: IRect, eraser: Boolean, draw: () -> Unit) {
         val d = doc ?: return
         val n = d.active?.takeIf { it.isRaster } ?: return
-        val s = surfaces[n.id] ?: return
-        val lock = n.props.alphaLock
+        val target = editId(n)
+        val s = surfaces[target] ?: return
+        // 마스크(알파 = 가림)에서는 그리기 = 드러내기(지움), 지우개 = 가리기(칠함). 투명 잠금은 무시.
+        val onMask = target < 0
+        val eraser = if (onMask) !eraser else eraser
+        val lock = !onMask && n.props.alphaLock
         markDirty(rect)
         if (eraser && lock) return
         val saved = HashMap<Int, ByteBuffer?>()
@@ -1244,9 +1344,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         // 실제로 바뀐 게 없는 타일(새로 만들었다 바로 비운 것)은 기록에서 뺍니다.
         saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
         if (saved.isEmpty()) return
-        history.push(TilesCommand(n.id, saved))
+        history.push(TilesCommand(target, saved))
         version++
-        thumbQueue.add(n.id)
+        thumbQueue.add(target)
         notifyHistory()
     }
 
@@ -1257,7 +1357,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val n = editableActive() ?: return
         if (op is Op.Transform) return
         finishOp()
-        val s = surfaces[n.id]!!
+        val s = surfaces[editId(n)]!!
         val bounds = if (hasSelection) {
             selBounds?.let { contentBounds(s, it) }
         } else {
@@ -1323,7 +1423,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     private fun commitTransformGl(o: Op.Transform, d: Document) {
         val n = d.active?.takeIf { it.isRaster }
-        val s = n?.let { surfaces[it.id] }
+        val s = n?.let { surfaces[editId(it)] }
         if (n == null || s == null) {
             endTransform(o); return
         }
@@ -1554,11 +1654,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     val g = pairAt(depth + 1)
                     g.cur.clear(r)
                     if (n.isRaster) {
-                        drawSource(sourceOf(n), g, BlendMode.NORMAL, 1f, false, r)
+                        drawSource(layerSrc(n, r), g, BlendMode.NORMAL, 1f, false, r)
                     } else {
                         composeChildren(n.children, 0, n.children.size, g, r, depth + 1)
                     }
-                    for (c in clipped) drawSource(sourceOf(c), g, c.props.blend, c.props.opacity, true, r)
+                    for (c in clipped) drawSource(layerSrc(c, r), g, c.props.blend, c.props.opacity, true, r)
                     drawSource(Src.Tex(g.cur), t, normalBlend(n), p.opacity, false, r)
                 }
             }
@@ -1568,7 +1668,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     private fun composeNode(n: Node, t: PingPong, r: IRect, depth: Int) {
         if (n.isRaster) {
-            drawSource(sourceOf(n), t, n.props.blend, n.props.opacity, false, r)
+            drawSource(layerSrc(n, r), t, n.props.blend, n.props.opacity, false, r)
             return
         }
         if (n.props.blend == BlendMode.PASS_THROUGH && n.props.opacity >= 0.999f) {
@@ -1585,7 +1685,31 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     private fun sourceOf(n: Node): Src {
         val d = doc!!
-        return if (op != null && n.id == d.activeId) Src.Tex(preview!!) else Src.Tiles(surfaces[n.id]!!)
+        val live = op != null && n.id == d.activeId
+        return if (live && !isMaskEdit(n)) Src.Tex(preview!!) else Src.Tiles(surfaces[n.id]!!)
+    }
+
+    /**
+     * 합성에 쓸 레이어 소스. 마스크가 켜져 있으면 임시 버퍼에 "레이어 × (1 − 마스크 알파)"를 만들어 돌려줍니다.
+     * 임시 버퍼는 하나뿐이므로 돌려받은 즉시 그려야 합니다 (호출부는 모두 바로 drawSource).
+     */
+    private fun layerSrc(n: Node, r: IRect): Src {
+        val base = sourceOf(n)
+        if (!n.props.mask || !n.props.maskEnabled) return base
+        val d = doc!!
+        val maskSrc = if (op != null && n.id == d.activeId && isMaskEdit(n)) Src.Tex(preview!!)
+        else Src.Tiles(surfaces[-n.id] ?: return base)
+        val tmp = maskTmp ?: RenderTarget(d.width, d.height).also { maskTmp = it }
+        tmp.clear(r)
+        tmp.bind()
+        GlState.scissor(r)
+        GlState.off()
+        drawSourceCopy(base, 1f, r)
+        GlState.erase()
+        drawSourceCopy(maskSrc, 1f, r)
+        GlState.off()
+        GlState.noScissor()
+        return Src.Tex(tmp)
     }
 
     private fun drawSource(src: Src, t: PingPong, mode: BlendMode, opacity: Float, preserve: Boolean, r: IRect) {
@@ -1651,18 +1775,20 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 활성 레이어 + 진행 중 작업을 preview 버퍼의 r 영역에 그립니다. */
     private fun updatePreview(d: Document, n: Node, r: IRect) {
         val pv = preview!!
-        val s = surfaces[n.id] ?: return
+        val onMask = isMaskEdit(n)
+        val s = surfaces[editId(n)] ?: return
         pv.clear(r)
         pv.bind()
         GlState.scissor(r)
         GlState.off()
-        val lock = n.props.alphaLock
+        val lock = !onMask && n.props.alphaLock
         when (val o = op) {
             is Op.Stroke -> {
                 drawSourceCopy(Src.Tiles(s), 1f, r)
-                if (!(o.brush.isEraser && lock)) {
+                val erase = if (onMask) !o.brush.isEraser else o.brush.isEraser
+                if (!(erase && lock)) {
                     when {
-                        o.brush.isEraser -> GlState.erase()
+                        erase -> GlState.erase()
                         lock -> GlState.atop()
                         else -> GlState.over()
                     }
@@ -1671,7 +1797,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             is Op.Gradient -> {
                 drawSourceCopy(Src.Tiles(s), 1f, r)
-                if (lock) GlState.atop() else GlState.over()
+                when {
+                    onMask -> GlState.erase()
+                    lock -> GlState.atop()
+                    else -> GlState.over()
+                }
                 val p = o.p
                 compositor.drawMergeGradient(o.kind, o.c0, o.c1, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
             }
@@ -1781,6 +1911,13 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 compositor.drawTile(tile.tex, s.originX(key), s.originY(key), d.width, d.height, 1f)
             }
             val buf = th.readAll()
+            if (id < 0) {
+                for (i in 0 until th.width * th.height) {
+                    val v = (255 - (buf.get(i * 4 + 3).toInt() and 0xFF)).toByte()
+                    buf.put(i * 4, v).put(i * 4 + 1, v).put(i * 4 + 2, v).put(i * 4 + 3, 0xFF.toByte())
+                }
+                buf.rewind()
+            }
             val bmp = Bitmap.createBitmap(th.width, th.height, Bitmap.Config.ARGB_8888)
             bmp.copyPixelsFromBuffer(buf)
             main.post { listener.onThumbnail(id, bmp) }
@@ -1818,6 +1955,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             surfaces[n.id]?.let { s.copyFrom(it) }
             surfaces[c.id] = s
             thumbQueue.add(c.id)
+            if (n.props.mask) {
+                val m = TileSurface(d.width, d.height, pool)
+                surfaces[-n.id]?.let { m.copyFrom(it) }
+                surfaces[-c.id] = m
+                thumbQueue.add(-c.id)
+            }
         }
         for (ch in n.children) insert(c, c.children.size, cloneSubtree(d, ch))
         return c
@@ -1836,7 +1979,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     override fun applyShape(shape: TreeShape, activeId: Int, parked: MutableMap<Int, Map<Int, ByteBuffer>>) {
         val d = doc ?: return
-        val want = shape.filter { it.kind == NodeKind.RASTER }.map { it.id }.toSet()
+        val want = shape.filter { it.kind == NodeKind.RASTER }.flatMap { if (it.props.mask) listOf(it.id, -it.id) else listOf(it.id) }.toSet()
         for (id in surfaces.keys.toList()) {
             if (id !in want) {
                 val s = surfaces.remove(id)!!

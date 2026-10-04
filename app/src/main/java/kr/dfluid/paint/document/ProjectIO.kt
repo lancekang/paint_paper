@@ -31,6 +31,7 @@ import kotlin.math.roundToInt
  * .dfp 파일 = ZIP
  *   document.json  문서 정보 + 노드 트리 (부모 먼저, 형제는 아래 → 위)
  *   layers/<id>.png 래스터 레이어 (캔버스 크기, 투명 포함)
+ *   layers/<id>_mask.png 레이어 마스크 (알파 = 가리는 정도)
  *   thumbnail.png  합성 결과, 긴 변 256px
  *
  * 버전 1(평면 레이어 목록)도 읽을 수 있습니다. 모든 함수는 백그라운드 스레드에서 호출합니다.
@@ -57,6 +58,9 @@ object ProjectIO {
                     .put("clip", n.props.clip)
                     .put("expanded", n.props.expanded)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
+                if (n.kind == NodeKind.RASTER && n.props.mask) {
+                    o.put("mask", true).put("maskEnabled", n.props.maskEnabled).put("maskFile", "layers/${n.id}_mask.png")
+                }
                 nodes.put(o)
             }
             val json = JSONObject()
@@ -77,6 +81,13 @@ object ProjectIO {
                 bmp.compress(Bitmap.CompressFormat.PNG, 100, zip)
                 bmp.recycle()
                 zip.closeEntry()
+                if (n.props.mask) {
+                    zip.putNextEntry(ZipEntry("layers/${n.id}_mask.png"))
+                    val mb = assemble(data.width, data.height, n.maskTiles ?: emptyMap())
+                    mb.compress(Bitmap.CompressFormat.PNG, 100, zip)
+                    mb.recycle()
+                    zip.closeEntry()
+                }
             }
 
             if (composite != null) {
@@ -146,7 +157,12 @@ object ProjectIO {
                     val tiles = if (kind == NodeKind.RASTER) {
                         images[o.optString("file", "layers/$id.png")]?.let { split(it, w, h) } ?: emptyMap()
                     } else null
-                    nodes.add(NodeData(id, kind, propsOf(o, if (kind == NodeKind.FOLDER) "폴더" else "레이어"), parent, tiles))
+                    var props = propsOf(o, if (kind == NodeKind.FOLDER) "폴더" else "레이어")
+                    if (kind != NodeKind.RASTER) props = props.copy(mask = false)
+                    val maskTiles = if (props.mask) {
+                        images[o.optString("maskFile", "layers/${id}_mask.png")]?.let { split(it, w, h) } ?: emptyMap()
+                    } else null
+                    nodes.add(NodeData(id, kind, props, parent, tiles, maskTiles))
                 }
                 activeId = doc.optInt("active", nodes.firstOrNull { it.kind == NodeKind.RASTER }?.id ?: 0)
             }
@@ -169,6 +185,8 @@ object ProjectIO {
         alphaLock = o.optBoolean("alphaLock", false),
         clip = o.optBoolean("clip", false),
         expanded = o.optBoolean("expanded", true),
+        mask = o.optBoolean("mask", false),
+        maskEnabled = o.optBoolean("maskEnabled", true),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

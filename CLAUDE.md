@@ -14,6 +14,7 @@
   - **새 캔버스 배경**: 흰색/투명/색 지정. 배경이 있으면 맨 아래 "배경" 레이어(색으로 채운 타일) + "레이어 1". 선택은 `AppSettings.canvasTransparent/canvasBackground`에 기억.
   - **성능 측정** (상단 바 게이지 아이콘): FPS·프레임 시간·펜 지연(`engine/PerfMonitor.kt`), 부하 테스트 문서(A4 300dpi · 50장), 합성 벤치마크(전체/512px 영역/표시만, glFinish 포함).
   - **자동 선택**: 선택 도구의 4번째 모양 "자동"(SelShape.WAND). 채우기의 FloodFill로 영역을 구해 SelectionMask.applyMask로 합칩니다 (CanvasRenderer.selectByColor). 옵션은 AppSettings.wand*.
+  - **레이어 마스크**: 마스크 픽셀은 surfaces[-id] (알파 = 가리는 정도, 없는 타일 = 보임). 마스크 편집 중(CanvasRenderer.maskEditing)에는 editId(n) = -id로 그리고, 그리기↔지우개를 뒤집어 확정합니다(commitToActive/updatePreview). 합성은 layerSrc()가 maskTmp에 "레이어 × (1 − 마스크)"를 만들어 씀. 구조 변경(applyShape)이 -id surface도 보관/복원. .dfp는 layers/<id>_mask.png, PSD는 채널 -2(255 − 가림).
   - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널, 마스크·효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 
 ## 빌드 (Windows)

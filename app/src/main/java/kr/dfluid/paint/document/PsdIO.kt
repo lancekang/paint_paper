@@ -23,7 +23,8 @@ import kotlin.math.min
  * Photoshop .psd (버전 1, RGB 8비트) 읽기/쓰기. 백그라운드 스레드에서 호출합니다.
  *
  * 지원: 래스터 레이어, 폴더(통과/일반), 불투명도, 표시 여부, 합성 모드, 클리핑, 투명 픽셀 잠금, 한글 이름(luni).
- * 미지원(읽을 때 무시): 레이어 마스크, 조정 레이어, 텍스트/스마트 오브젝트의 편집 정보, 레이어 효과.
+ * 레이어 마스크(채널 -2): 우리 마스크는 "가림" 알파, PSD는 "보임" 회색값이라 255에서 빼서 바꿉니다.
+ * 미지원(읽을 때 무시): 벡터 마스크, 조정 레이어, 텍스트/스마트 오브젝트의 편집 정보, 레이어 효과.
  * 읽기는 무압축·RLE·ZIP(예측 포함) 레이어 채널을 지원합니다. 병합 이미지는 레이어가 없을 때만 쓰며 ZIP이면 오류.
  *
  * 레이어 레코드는 아래 → 위 순서. 폴더는 [구분자(lsct 3)] 자식들… [폴더 레코드(lsct 1/2)] 로 표현됩니다.
@@ -61,7 +62,11 @@ object PsdIO {
         val left: Int, val top: Int, val right: Int, val bottom: Int,
         /** 채널 -1(A), 0(R), 1(G), 2(B) 순서의 압축된 데이터 (압축 방식 2바이트 포함) */
         val channels: List<ByteArray>,
+        /** 레이어 마스크 (채널 -2) */
+        val mask: MaskOut? = null,
     )
+
+    private class MaskOut(val left: Int, val top: Int, val right: Int, val bottom: Int, val disabled: Boolean, val data: ByteArray)
 
     /** [composite] = 캔버스 크기 프리멀티플라이드 RGBA (병합 이미지용). */
     fun write(out: OutputStream, data: DocumentData, composite: ByteBuffer) {
@@ -100,7 +105,8 @@ object PsdIO {
 
         // ---- 레이어 정보 ----
         val recordBytes = records.map { recordHeader(it) }
-        var layerInfoLen = 2L + recordBytes.sumOf { it.size.toLong() } + records.sumOf { r -> r.channels.sumOf { it.size.toLong() } }
+        var layerInfoLen = 2L + recordBytes.sumOf { it.size.toLong() } +
+            records.sumOf { r -> r.channels.sumOf { it.size.toLong() } + (r.mask?.data?.size ?: 0) }
         val pad = (layerInfoLen % 2).toInt()
         layerInfoLen += pad
         if (layerInfoLen + 8 > Int.MAX_VALUE) throw IOException("PSD 파일이 너무 큽니다 (2GB 초과).")
@@ -108,7 +114,10 @@ object PsdIO {
         dos.writeInt(layerInfoLen.toInt())
         dos.writeShort(records.size)
         recordBytes.forEach { dos.write(it) }
-        for (r in records) r.channels.forEach { dos.write(it) }
+        for (r in records) {
+            r.channels.forEach { dos.write(it) }
+            r.mask?.let { dos.write(it.data) }
+        }
         if (pad == 1) dos.write(0)
         dos.writeInt(0) // 전역 레이어 마스크 정보
 
@@ -127,8 +136,9 @@ object PsdIO {
             l = min(l, x); t = min(t, y)
             r = max(r, min(w, x + TILE)); b = max(b, min(h, y + TILE))
         }
+        val mask = if (n.props.mask) maskOut(n, w, h) else null
         if (tiles.isEmpty() || r <= l || b <= t) {
-            return Record(n.props.name, n.props, 0, 0, 0, 0, 0, List(4) { byteArrayOf(0, 0) })
+            return Record(n.props.name, n.props, 0, 0, 0, 0, 0, List(4) { byteArrayOf(0, 0) }, mask)
         }
         val bw = r - l
         val bh = b - t
@@ -158,18 +168,55 @@ object PsdIO {
                 }
             }
         }
-        return Record(n.props.name, n.props, 0, l, t, r, b, planes.map { rleChannel(it, bw, bh) })
+        return Record(n.props.name, n.props, 0, l, t, r, b, planes.map { rleChannel(it, bw, bh) }, mask)
+    }
+
+    /** 마스크 타일(알파 = 가림) → PSD 마스크 채널(255 = 보임). 범위 밖 기본값은 255(보임). */
+    private fun maskOut(n: NodeData, w: Int, h: Int): MaskOut {
+        val tiles = n.maskTiles.orEmpty()
+        val cols = TileMath.cols(w)
+        var l = Int.MAX_VALUE; var t = Int.MAX_VALUE; var r = 0; var b = 0
+        for (k in tiles.keys) {
+            val x = (k % cols) * TILE
+            val y = (k / cols) * TILE
+            l = min(l, x); t = min(t, y)
+            r = max(r, min(w, x + TILE)); b = max(b, min(h, y + TILE))
+        }
+        if (tiles.isEmpty() || r <= l || b <= t) return MaskOut(0, 0, 0, 0, !n.props.maskEnabled, byteArrayOf(0, 0))
+        val bw = r - l
+        val bh = b - t
+        val plane = ByteArray(bw * bh) { 0xFF.toByte() }
+        for ((k, buf) in tiles) {
+            val ox = (k % cols) * TILE
+            val oy = (k / cols) * TILE
+            val src = buf.duplicate()
+            for (yy in 0 until TILE) {
+                val cy = oy + yy
+                if (cy >= b) break
+                val pw = min(TILE, r - ox)
+                for (xx in 0 until pw) {
+                    val a = src.get((yy * TILE + xx) * 4 + 3).toInt() and 0xFF
+                    plane[(cy - t) * bw + (ox - l) + xx] = (255 - a).toByte()
+                }
+            }
+        }
+        return MaskOut(l, t, r, b, !n.props.maskEnabled, rleChannel(plane, bw, bh))
     }
 
     private fun recordHeader(r: Record): ByteArray {
         val bytes = ByteArrayOutputStream(256)
         val o = DataOutputStream(bytes)
         o.writeInt(r.top); o.writeInt(r.left); o.writeInt(r.bottom); o.writeInt(r.right)
-        o.writeShort(4)
+        val m = r.mask
+        o.writeShort(if (m != null) 5 else 4)
         val ids = intArrayOf(-1, 0, 1, 2)
         for (i in 0 until 4) {
             o.writeShort(ids[i])
             o.writeInt(r.channels[i].size)
+        }
+        if (m != null) {
+            o.writeShort(-2)
+            o.writeInt(m.data.size)
         }
         o.writeBytes("8BIM")
         val folderBlend = if (r.section == 1 || r.section == 2) r.props.blend else null
@@ -186,7 +233,16 @@ object PsdIO {
 
         val extra = ByteArrayOutputStream(128)
         val e = DataOutputStream(extra)
-        e.writeInt(0) // 레이어 마스크
+        if (m != null) {
+            // 레이어 마스크 데이터 20바이트: 범위, 기본색(255 = 보임), 플래그(비트1 = 끔), 패딩 2
+            e.writeInt(20)
+            e.writeInt(m.top); e.writeInt(m.left); e.writeInt(m.bottom); e.writeInt(m.right)
+            e.writeByte(255)
+            e.writeByte(if (m.disabled) 0x02 else 0)
+            e.writeShort(0)
+        } else {
+            e.writeInt(0) // 레이어 마스크
+        }
         e.writeInt(0) // 블렌딩 범위
         // 파스칼 이름 (ASCII만, 4바이트 정렬). 실제 이름은 luni에.
         val ascii = r.name.map { if (it.code in 32..126) it else '_' }.joinToString("").take(255)
@@ -350,6 +406,11 @@ object PsdIO {
         var name: String, var section: Int = 0, var sectionBlend: String? = null,
     ) {
         var locked = false
+        var hasMask = false
+        var maskTop = 0; var maskLeft = 0; var maskBottom = 0; var maskRight = 0
+        var maskDefault = 255
+        var maskFlags = 0
+        var maskTiles: CpuTiles? = null
         var tiles: CpuTiles? = null
     }
 
@@ -438,6 +499,8 @@ object PsdIO {
                     flatten(id, t.children)
                 } else {
                     val props = LayerProps(
+                        mask = l.hasMask,
+                        maskEnabled = l.maskFlags and 0x02 == 0,
                         name = l.name.ifBlank { "레이어" },
                         opacity = l.opacity / 255f,
                         blend = blendOf(l.blendKey).let { if (it == BlendMode.PASS_THROUGH) BlendMode.NORMAL else it },
@@ -445,7 +508,7 @@ object PsdIO {
                         alphaLock = l.locked || l.flags and 0x01 != 0,
                         clip = l.clipping != 0,
                     )
-                    nodes.add(NodeData(id, NodeKind.RASTER, props, parentId, l.tiles ?: emptyMap()))
+                    nodes.add(NodeData(id, NodeKind.RASTER, props, parentId, l.tiles ?: emptyMap(), if (l.hasMask) l.maskTiles ?: emptyMap() else null))
                     activeId = id // 맨 위 레이어가 마지막에 남음
                 }
             }
@@ -471,13 +534,26 @@ object PsdIO {
         r.u8()
         val extraLen = r.u32()
         val extraEnd = r.pos + extraLen
-        r.skip(r.u32()) // 레이어 마스크
+        val maskLen = r.u32()
+        val maskEnd = r.pos + maskLen
+        var maskInfo: IntArray? = null
+        if (maskLen >= 18) {
+            maskInfo = intArrayOf(r.i32(), r.i32(), r.i32(), r.i32(), r.u8(), r.u8())
+        }
+        r.skipTo(maskEnd)
         r.skip(r.u32()) // 블렌딩 범위
         val nameLen = r.u8()
         var name = String(r.bytes(nameLen), Charsets.ISO_8859_1)
         var padded = 1 + nameLen
         while (padded % 4 != 0) { r.u8(); padded++ }
         val layer = LayerIn(top, left, bottom, right, ids, lens, key, opacity, clipping, flags, name)
+        if (maskInfo != null && ids.contains(-2)) {
+            layer.hasMask = true
+            layer.maskTop = maskInfo[0]; layer.maskLeft = maskInfo[1]
+            layer.maskBottom = maskInfo[2]; layer.maskRight = maskInfo[3]
+            layer.maskDefault = maskInfo[4]
+            layer.maskFlags = maskInfo[5]
+        }
         while (r.pos + 12 <= extraEnd) {
             val sig = r.str4()
             if (sig != "8BIM" && sig != "8B64") break
@@ -519,6 +595,11 @@ object PsdIO {
             if (l.channelLens[i] >= 2 && id in -1..2 && lw > 0 && lh > 0) {
                 val plane = readPlane(r, lw, lh, l.channelLens[i] - 2)
                 planes[id + 1] = plane
+            } else if (id == -2 && l.hasMask && l.section == 0 && l.channelLens[i] >= 2) {
+                val mw = l.maskRight - l.maskLeft
+                val mh = l.maskBottom - l.maskTop
+                val plane = if (mw > 0 && mh > 0) readPlane(r, mw, mh, l.channelLens[i] - 2) else null
+                l.maskTiles = maskToTiles(plane, l.maskLeft, l.maskTop, mw, mh, l.maskDefault, docW, docH)
             }
             r.skipTo(end)
         }
@@ -595,6 +676,39 @@ object PsdIO {
                 }
             }
         }
+    }
+
+    /**
+     * PSD 마스크(255 = 보임) → 마스크 타일(알파 = 가림 = 255 − 값). 범위 밖은 [default]를 씁니다.
+     * 기본값이 255(보임)면 범위 안 타일만, 아니면 캔버스 전체 타일을 만듭니다.
+     */
+    private fun maskToTiles(plane: ByteArray?, left: Int, top: Int, mw: Int, mh: Int, default: Int, docW: Int, docH: Int): CpuTiles {
+        val tiles = HashMap<Int, ByteBuffer>()
+        val cols = TileMath.cols(docW)
+        val rows = TileMath.rows(docH)
+        val outside = 255 - default
+        val txs = if (outside == 0) max(0, left) / TILE..(min(docW, left + mw) - 1) / TILE else 0 until cols
+        val tys = if (outside == 0) max(0, top) / TILE..(min(docH, top + mh) - 1) / TILE else 0 until rows
+        if (outside == 0 && (plane == null || mw <= 0 || mh <= 0)) return tiles
+        for (ty in tys) for (tx in txs) {
+            val buf = GlUtil.byteBuffer(TILE_BYTES)
+            var any = false
+            for (yy in 0 until TILE) for (xx in 0 until TILE) {
+                val cx = tx * TILE + xx
+                val cy = ty * TILE + yy
+                if (cx >= docW || cy >= docH) continue
+                val mx = cx - left
+                val my = cy - top
+                val hide = if (plane != null && mx in 0 until mw && my in 0 until mh) 255 - (plane[my * mw + mx].toInt() and 0xFF) else outside
+                if (hide != 0) {
+                    buf.put((yy * TILE + xx) * 4 + 3, hide.toByte())
+                    any = true
+                }
+            }
+            buf.rewind()
+            if (any) tiles[ty * cols + tx] = buf
+        }
+        return tiles
     }
 
     /** 채널 평면(비프리멀티플라이) → 캔버스 타일(프리멀티플라이드). 알파가 없으면 불투명으로 봅니다. */

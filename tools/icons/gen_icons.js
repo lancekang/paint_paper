@@ -127,6 +127,7 @@ const icons = {
     { d: 'M2,12C2,12 5.5,5 12,5C18.5,5 22,12 22,12C22,12 18.5,19 12,19C5.5,19 2,12 2,12Z', alpha: 0.45 },
     { d: circle(12, 12, 3), alpha: 0.45 }, 'M3,3l18,18',
   ],
+  mask: [rect(3, 3, 18, 18, 2), { d: circle(12, 12, 5), fill: true, alpha: 0.9 }],
   chevron_right: ['M9,6l6,6l-6,6'],
   chevron_down: ['M6,9l6,6l6,-6'],
 

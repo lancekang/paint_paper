@@ -35,6 +35,10 @@ data class LayerProps(
     val clip: Boolean = false,
     /** 폴더 펼침 (UI 전용) */
     val expanded: Boolean = true,
+    /** 레이어 마스크가 있음 (래스터만). 마스크 픽셀은 렌더러의 surfaces[-id] */
+    val mask: Boolean = false,
+    /** 마스크 적용 여부 (끄면 마스크를 무시하고 레이어 전체가 보임) */
+    val maskEnabled: Boolean = true,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */
@@ -186,6 +190,8 @@ class NodeData(
     val parentId: Int,
     /** 래스터만. 타일 키 → 256×256 RGBA */
     val tiles: CpuTiles?,
+    /** 레이어 마스크 타일. 알파 = 가리는 정도 (0 = 보임, 255 = 숨김). 없는 타일 = 보임 */
+    val maskTiles: CpuTiles? = null,
 )
 
 class DocumentData(

@@ -69,6 +69,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             icon(R.drawable.ic_duplicate, "복제", Action.LAYER_DUPLICATE) { renderer.duplicate() },
             icon(R.drawable.ic_trash, "삭제") { renderer.deleteNode() },
             icon(R.drawable.ic_arrow_up, "위로 이동") { renderer.moveNode(+1) },
+            icon(R.drawable.ic_mask, "레이어 마스크 (없으면 추가, 있으면 메뉴)") { maskMenu() },
         ), lp(8f))
         addView(row(
             icon(R.drawable.ic_arrow_down, "아래로 이동") { renderer.moveNode(-1) },
@@ -140,7 +141,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     fun update(newNodes: List<NodeInfo>, newActive: Int, liveIds: Set<Int>) {
         nodes = newNodes
         activeId = newActive
-        thumbs.keys.toList().forEach { if (it !in liveIds) thumbs.remove(it)?.recycle() }
+        // 마스크 썸네일은 -id로 저장됩니다.
+        thumbs.keys.toList().forEach { if (it !in liveIds && -it !in liveIds) thumbs.remove(it)?.recycle() }
         val cur = active
         if (cur != null && dragStartProps == null) {
             val pct = (cur.props.opacity * 100).roundToInt()
@@ -213,7 +215,29 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                 thumbs[info.id]?.let { setImageBitmap(it) }
             }
             thumbViews[info.id] = img
-            row.addView(img, LinearLayout.LayoutParams(size, size).apply { rightMargin = Ui.dp(ctx, 8f) })
+            val editingMask = info.id == activeId && renderer.maskEditing && p.mask
+            if (p.mask) {
+                // 레이어 썸네일을 누르면 레이어 편집, 마스크 썸네일을 누르면 마스크 편집
+                img.setOnClickListener { renderer.selectNode(info.id, mask = false) }
+                Ui.setTip(img, "레이어 편집")
+                if (info.id == activeId && !editingMask) img.background = Ui.rounded(Color.WHITE, 0f, Ui.dp(ctx, 2f), Ui.BUTTON_ON)
+            }
+            row.addView(img, LinearLayout.LayoutParams(size, size).apply { rightMargin = Ui.dp(ctx, if (p.mask) 4f else 8f) })
+            if (p.mask) {
+                val m = ImageView(ctx).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    thumbs[-info.id]?.let { setImageBitmap(it) }
+                    val pad = Ui.dp(ctx, 2f)
+                    setPadding(pad, pad, pad, pad)
+                    background = Ui.rounded(Color.WHITE, 0f, Ui.dp(ctx, 2f), if (editingMask) Ui.BUTTON_ON else Color.GRAY)
+                    alpha = if (p.maskEnabled) 1f else 0.4f
+                    isClickable = true
+                    Ui.setTip(this, if (p.maskEnabled) "마스크 편집 (흰색 = 보임, 검정 = 가림)" else "마스크 편집 (마스크 꺼짐)")
+                    setOnClickListener { renderer.selectNode(info.id, mask = true) }
+                }
+                thumbViews[-info.id] = m
+                row.addView(m, LinearLayout.LayoutParams(size, size).apply { rightMargin = Ui.dp(ctx, 8f) })
+            }
         }
         val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(Ui.text(ctx, if (folder) "[폴더] ${p.name}" else p.name, 13f).apply { maxLines = 1 })
@@ -221,11 +245,45 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             append((p.opacity * 100).roundToInt()).append('%')
             if (p.blend != BlendMode.NORMAL) append(" · ").append(p.blend.label)
             if (p.alphaLock) append(" · 잠금")
+            if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }
         texts.addView(Ui.text(ctx, detail, 11f, Ui.SUBTEXT))
         row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
+    }
+
+    /** 마스크가 없으면 추가, 있으면 편집 전환·켜기/끄기·적용·삭제 메뉴. */
+    private fun maskMenu() {
+        val info = active ?: return
+        if (info.kind != NodeKind.RASTER) {
+            android.widget.Toast.makeText(ctx, "폴더가 아닌 레이어를 선택하세요.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val p = info.props
+        if (!p.mask) {
+            renderer.addMask()
+            return
+        }
+        val editing = renderer.maskEditing
+        val items = arrayOf(
+            if (editing) "레이어 편집으로" else "마스크 편집",
+            if (p.maskEnabled) "마스크 끄기" else "마스크 켜기",
+            "마스크 적용 (가린 부분을 실제로 지움)",
+            "마스크 삭제",
+        )
+        AlertDialog.Builder(ctx)
+            .setTitle("레이어 마스크")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> renderer.selectNode(info.id, mask = !editing)
+                    1 -> renderer.setProps(info.id, p.copy(maskEnabled = !p.maskEnabled), record = true)
+                    2 -> renderer.applyMask()
+                    3 -> renderer.deleteMask()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun rename(info: NodeInfo) {
