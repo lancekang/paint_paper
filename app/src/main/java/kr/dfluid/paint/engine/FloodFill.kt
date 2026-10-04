@@ -95,36 +95,84 @@ object FloodFill {
         tolerance: Int, gap: Int, expand: Int, selection: ByteBuffer?,
     ): Result? {
         val px = ref.duplicate()
-        var acc: ByteArray? = null
-        var minX = w; var minY = h; var maxX = -1; var maxY = -1
-        var runs = 0
+        val n = w * h
+        // 씨앗을 색별로 묶음: 같은 색이면 "비슷한 색" 계산·틈 메우기·확장을 한 번만
+        val groups = LinkedHashMap<Int, ArrayList<Int>>()
         var i = 0
-        while (i + 1 < seeds.size && runs < MAX_PAINT_RUNS) {
+        while (i + 1 < seeds.size) {
             val x = seeds[i]; val y = seeds[i + 1]
             i += 2
             if (x !in 0 until w || y !in 0 until h) continue
-            val k = y * w + x
-            if (acc != null && acc[k].toInt() != 0) continue
             if (nearInk(px, w, h, x, y)) continue
-            val r = run(ref, w, h, x, y, tolerance, gap, expand, selection) ?: continue
-            runs++
-            val a = acc ?: ByteArray(w * h).also { acc = it }
-            val b = r.bounds
-            for (yy in b.y until b.bottom) {
-                val row = yy * w
-                for (xx in b.x until b.right) {
-                    val v = r.mask[row + xx].toInt() and 0xFF
-                    if (v > (a[row + xx].toInt() and 0xFF)) a[row + xx] = v.toByte()
-                }
-            }
-            if (b.x < minX) minX = b.x
-            if (b.y < minY) minY = b.y
-            if (b.right - 1 > maxX) maxX = b.right - 1
-            if (b.bottom - 1 > maxY) maxY = b.bottom - 1
+            val k = y * w + x
+            groups.getOrPut(px.getInt(k * 4)) { ArrayList() }.add(k)
         }
-        val out = acc ?: return null
+        if (groups.isEmpty()) return null
+        val acc = ByteArray(n)
+        var runs = 0
+        for ((_, list) in groups) {
+            if (runs >= MAX_PAINT_RUNS) break
+            val o0 = list[0] * 4
+            val r0 = px.get(o0).toInt() and 0xFF
+            val g0 = px.get(o0 + 1).toInt() and 0xFF
+            val b0 = px.get(o0 + 2).toInt() and 0xFF
+            val a0 = px.get(o0 + 3).toInt() and 0xFF
+            val match = ByteArray(n)
+            for (p in 0 until n) {
+                val o = p * 4
+                val d = max(
+                    max(abs((px.get(o).toInt() and 0xFF) - r0), abs((px.get(o + 1).toInt() and 0xFF) - g0)),
+                    max(abs((px.get(o + 2).toInt() and 0xFF) - b0), abs((px.get(o + 3).toInt() and 0xFF) - a0))
+                )
+                if (d <= tolerance) match[p] = 1
+            }
+            val thick = if (gap > 0) {
+                val walls = ByteArray(n) { if (match[it].toInt() == 0) 1 else 0 }
+                val t = dilate(walls, w, h, gap)
+                ByteArray(n) { if (t[it].toInt() == 0) 1 else 0 }
+            } else null
+            // 이 색의 씨앗들이 닿은 칸을 모두 합침 (이미 칠한 칸 안의 씨앗은 건너뜀)
+            val union = ByteArray(n)
+            var any = false
+            for (k in list) {
+                if (union[k].toInt() != 0 || acc[k].toInt() != 0) continue
+                if (runs >= MAX_PAINT_RUNS) break
+                val fillable = if (thick != null && thick[k].toInt() == 1) thick else match
+                val reg = scanlineFill(fillable, w, h, k % w, k / w)
+                for (p in 0 until n) if (reg[p].toInt() != 0) union[p] = 1
+                runs++
+                any = true
+            }
+            if (!any) continue
+            var region = union
+            // 틈 메우기로 줄어든 만큼 되돌리기 (선 픽셀은 제외)
+            if (thick != null) {
+                val grown = dilate(region, w, h, gap)
+                for (p in 0 until n) if (match[p].toInt() == 0) grown[p] = 0
+                for (p in 0 until n) if (region[p].toInt() != 0) grown[p] = 1
+                region = grown
+            }
+            if (expand > 0) region = dilate(region, w, h, expand)
+            val sel = selection?.duplicate()
+            for (p in 0 until n) {
+                if (region[p].toInt() == 0) continue
+                val v = if (sel != null) sel.get(p).toInt() and 0xFF else 255
+                if (v > (acc[p].toInt() and 0xFF)) acc[p] = v.toByte()
+            }
+        }
+        var minX = w; var minY = h; var maxX = -1; var maxY = -1
+        for (y in 0 until h) {
+            val row = y * w
+            for (x in 0 until w) {
+                if (acc[row + x].toInt() == 0) continue
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
         if (maxX < 0) return null
-        return Result(out, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
+        return Result(acc, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
     }
 
     /** 씨앗이 선 위이거나 선 가장자리(2px 안)에 있으면 true (가장자리 회색에서 시작하면 선을 따라 번지므로) */
