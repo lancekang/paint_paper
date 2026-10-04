@@ -34,6 +34,7 @@ class Compositor {
     private val filter = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_FS)
     private val borderH = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_H_FS)
     private val tone = GlProgram(Shaders.QUAD_VS, Shaders.TONE_FS)
+    private val colorize = GlProgram(Shaders.QUAD_VS, Shaders.COLORIZE_FS)
     private val borderV = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_V_FS)
     private val filterCombine = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_COMBINE_FS)
     private val viewMatrix = FloatArray(9)
@@ -186,6 +187,7 @@ class Compositor {
         GLES20.glUniform1i(filter.u("u_src"), 0)
         GLES20.glUniform1i(filter.u("u_kind"), kind)
         GLES20.glUniform4f(filter.u("u_p"), p.getOrElse(0) { 0f }, p.getOrElse(1) { 0f }, p.getOrElse(2) { 0f }, p.getOrElse(3) { 0f })
+        GLES20.glUniform4f(filter.u("u_q"), p.getOrElse(4) { 0f }, p.getOrElse(5) { 0f }, p.getOrElse(6) { 0f }, p.getOrElse(7) { 0f })
         GLES20.glUniform2f(filter.u("u_dir"), dirX, dirY)
         GLES20.glUniform1i(filter.u("u_taps"), taps)
         quad.draw()
@@ -211,6 +213,15 @@ class Compositor {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         unbind1()
+    }
+
+    /** 레이어 컬러: srcTex(캔버스 크기) → 현재 타깃. 블렌딩 끄고 호출. */
+    fun drawColorize(srcTex: Int, rgb: Int) {
+        colorize.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(colorize.u("u_src"), 0)
+        GLES20.glUniform3f(colorize.u("u_color"), android.graphics.Color.red(rgb) / 255f, android.graphics.Color.green(rgb) / 255f, android.graphics.Color.blue(rgb) / 255f)
+        quad.draw()
     }
 
     /** 톤 효과: srcTex(캔버스 크기) → 현재 타깃. 블렌딩 끄고 호출. color = 프리멀티플라이드. */

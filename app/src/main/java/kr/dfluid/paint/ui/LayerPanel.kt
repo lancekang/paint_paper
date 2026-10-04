@@ -134,6 +134,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             "불투명한 부분을 선택 영역으로",
             if (info.kind == NodeKind.RASTER) (if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") else null,
             if (info.kind == NodeKind.RASTER) (if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") else null,
+            if (info.kind == NodeKind.RASTER) (if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") else null,
             if (info.props.text != null) "래스터화 (텍스트를 일반 레이어로)" else null,
         ).filterNotNull().toTypedArray()
         Ui.dialog(ctx)
@@ -149,7 +150,11 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
                     7 -> if (info.kind == NodeKind.RASTER) borderDialog(info) else Unit
                     8 -> if (info.kind == NodeKind.RASTER) toneDialog(info) else Unit
-                    9 -> renderer.rasterizeText(info.id)
+                    9 -> if (info.kind == NodeKind.RASTER) {
+                        if (info.props.layerColorOn) renderer.setProps(info.id, info.props.copy(layerColorOn = false), record = true)
+                        else layerColorDialog(info)
+                    }
+                    10 -> renderer.rasterizeText(info.id)
                 }
             }
             .setNegativeButton("취소", null)
@@ -213,6 +218,21 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         }
         dlg.show()
         preview(false)
+    }
+
+    /** 레이어 컬러: 미리 정한 색 몇 가지 + 색 지정. 고르면 바로 켜짐 (실행취소 한 단계). */
+    private fun layerColorDialog(info: NodeInfo) {
+        val presets = listOf("파랑" to 0xFF3D8BFF.toInt(), "빨강" to 0xFFE53935.toInt(), "초록" to 0xFF43A047.toInt(), "회색" to 0xFF9E9E9E.toInt())
+        val items = (presets.map { it.first } + "색 지정…").toTypedArray()
+        fun on(c: Int) = renderer.setProps(info.id, info.props.copy(layerColorOn = true, layerColor = c), record = true)
+        Ui.dialog(ctx)
+            .setTitle("레이어 컬러 · ${info.props.name}")
+            .setItems(items) { _, which ->
+                if (which < presets.size) on(presets[which].second)
+                else Dialogs.colorPicker(ctx, info.props.layerColor) { c -> on(c) }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     /** 톤 효과: 망점 간격·각도·색. 레이어의 농도(알파 × 어두움)가 망점 크기가 됩니다. */
@@ -395,6 +415,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.text != null) append(" · 텍스트")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
+            if (p.layerColorOn) append(" · 레이어 컬러")
             if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }

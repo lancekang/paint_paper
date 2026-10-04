@@ -217,6 +217,7 @@ in vec2 v_uv;
 uniform sampler2D u_src;
 uniform int u_kind;
 uniform vec4 u_p;
+uniform vec4 u_q;
 uniform vec2 u_dir;
 uniform int u_taps;
 out vec4 o;
@@ -272,6 +273,9 @@ void main() {
     } else if (u_kind == 5) {
         float n = max(u_p.x - 1.0, 1.0);
         c = floor(c * n + 0.5) / n;
+    } else if (u_kind == 6) {
+        float lum = dot(c, vec3(0.299, 0.587, 0.114));
+        c = mix(c, mix(u_p.yzw, u_q.xyz, lum), u_p.x);
     }
     o = vec4(clamp(c, 0.0, 1.0) * S.a, S.a);
 }
@@ -443,6 +447,22 @@ void main() {
     float cov = clamp((r - d) / aa + 0.5, 0.0, 1.0);
     if (dens <= 0.002) cov = 0.0;
     o = u_color * cov;
+}
+"""
+
+    /** 레이어 컬러: 알파는 그대로, 색만 u_color로 (밝은 부분은 흰색 쪽으로 남겨 선의 농담을 유지). */
+    const val COLORIZE_FS = """#version 300 es
+precision highp float;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform vec3 u_color;
+out vec4 o;
+void main() {
+    vec4 s = texture(u_src, v_cuv);
+    vec3 c = s.a > 0.0 ? s.rgb / s.a : vec3(0.0);
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    vec3 outc = mix(u_color, vec3(1.0), lum);
+    o = vec4(outc * s.a, s.a);
 }
 """
 

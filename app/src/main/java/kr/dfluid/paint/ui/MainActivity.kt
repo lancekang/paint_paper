@@ -1240,7 +1240,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private fun showFilter(kind: FilterKind) {
         val ctx = this
         val values = IntArray(kind.params.size) { kind.params[it].default }
-        fun spec() = FilterSpec(kind, kind.params.mapIndexed { i, p -> values[i] * p.scale })
+        fun spec(): FilterSpec {
+            val v = kind.params.mapIndexed { i, p -> values[i] * p.scale }
+            if (kind != FilterKind.GRADIENT_MAP) return FilterSpec(kind, v)
+            // 그라데이션 맵: 주색(어두운 곳) → 보조색(밝은 곳)
+            fun rgb(c: Int) = listOf(Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f)
+            return FilterSpec(kind, v + rgb(settings.primaryColor) + rgb(settings.secondaryColor))
+        }
         fun label(i: Int): String {
             val p = kind.params[i]
             val v = values[i]

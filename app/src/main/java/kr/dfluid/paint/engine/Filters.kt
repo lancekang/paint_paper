@@ -20,6 +20,8 @@ enum class FilterKind(val label: String, val shaderId: Int, val params: List<Fil
         FilterParam("대비", -100, 100, 0, "", 0.01f),
     )),
     INVERT("색 반전", 3, emptyList()),
+    /** 밝기 → 주색(어두움)~보조색(밝음). 두 색은 FilterSpec.values 뒤에 rgb rgb로 붙입니다. */
+    GRADIENT_MAP("그라데이션 맵 (주색 → 보조색)", 6, listOf(FilterParam("강도", 0, 100, 100, "%", 0.01f))),
     POSTERIZE("포스터화", 5, listOf(FilterParam("단계", 2, 32, 4))),
     BLUR("가우시안 흐리기", 4, listOf(FilterParam("범위", 1, 64, 4, "px")), forMask = true),
     SHARPEN("선명하게 (언샤프 마스크)", 4, listOf(

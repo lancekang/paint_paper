@@ -63,6 +63,7 @@ object ProjectIO {
                 n.props.text?.let { o.put("text", it.toJson()) }
                 if (n.props.quickMask) o.put("quickMask", true)
                 if (n.props.borderWidth > 0f) o.put("borderWidth", n.props.borderWidth.toDouble()).put("borderColor", n.props.borderColor)
+                if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
                 if (n.props.toneCell > 0f) o.put("toneCell", n.props.toneCell.toDouble()).put("toneAngle", n.props.toneAngle.toDouble()).put("toneColor", n.props.toneColor)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
                 if (n.kind == NodeKind.RASTER && n.props.mask) {
@@ -202,6 +203,8 @@ object ProjectIO {
         toneCell = o.optDouble("toneCell", 0.0).toFloat().coerceIn(0f, 64f),
         toneAngle = o.optDouble("toneAngle", 45.0).toFloat(),
         toneColor = o.optInt("toneColor", 0xFF000000.toInt()),
+        layerColorOn = o.optBoolean("layerColorOn", false),
+        layerColor = o.optInt("layerColor", 0xFF3D8BFF.toInt()),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */
