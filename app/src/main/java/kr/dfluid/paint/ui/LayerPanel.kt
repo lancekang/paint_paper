@@ -44,6 +44,50 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
 
     private val active: NodeInfo? get() = nodes.firstOrNull { it.id == activeId }
 
+    /** 여러 레이어 고르기: 켜져 있으면 행을 누를 때 고름/풂 */
+    private var multi = false
+    private val picked = LinkedHashSet<Int>()
+    private val multiCount = Ui.text(ctx, "", 13f, Ui.TEXT)
+    private val multiBar = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        visibility = View.GONE
+        addView(multiCount, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        fun act(label: String, f: () -> Unit) = addView(Ui.button(ctx, label) {
+            if (picked.isEmpty()) return@button
+            f()
+            endMulti()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = Ui.dp(ctx, 4f)
+        })
+        act("폴더로") { renderer.groupNodes(picked.toList()) }
+        act("합치기") { renderer.mergeNodes(picked.toList()) }
+        act("삭제") { renderer.deleteNodes(picked.toList()) }
+        addView(Ui.button(ctx, "완료") { endMulti() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = Ui.dp(ctx, 4f)
+        })
+    }
+
+    private fun startMulti() {
+        multi = true
+        picked.clear()
+        if (activeId != 0) picked.add(activeId)
+        refreshMulti()
+        rebuildList()
+    }
+
+    private fun endMulti() {
+        multi = false
+        picked.clear()
+        refreshMulti()
+        rebuildList()
+    }
+
+    private fun refreshMulti() {
+        multiBar.visibility = if (multi) View.VISIBLE else View.GONE
+        multiCount.text = "${picked.size}개 고름"
+    }
+
     /** 레이어 카드 머리글에 둘 버튼: 자주 쓰는 것만 (새 레이어, 새 폴더, 더보기). */
     val headerActions: List<ImageView> = listOf(
         icon(R.drawable.ic_layer_add, "새 레이어", Action.LAYER_NEW) { renderer.addLayer() },
@@ -85,6 +129,9 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     }
 
     init {
+        view.addView(multiBar, 1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = Ui.dp(ctx, 6f)
+        })
         setBlendChoices(BlendMode.forLayers)
         blend.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, v: View?, position: Int, id: Long) {
@@ -130,6 +177,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         // (항목, 동작) 쌍: 레이어 종류에 따라 항목이 빠져도 번호가 어긋나지 않게
         val entries = ArrayList<Pair<String, () -> Unit>>()
         fun add(label: String, f: () -> Unit) = entries.add(label to f)
+        add("여러 레이어 고르기 (묶기·합치기·삭제)") { startMulti() }
         add("위로 이동") { renderer.moveNode(+1) }
         add("아래로 이동") { renderer.moveNode(-1) }
         add(tips.text("레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR)) { renderer.clearLayer() }
@@ -424,6 +472,10 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     fun update(newNodes: List<NodeInfo>, newActive: Int, liveIds: Set<Int>) {
         nodes = newNodes
         activeId = newActive
+        if (multi) {
+            picked.retainAll(newNodes.map { it.id }.toSet())
+            refreshMulti()
+        }
         // 마스크 썸네일은 -id로 저장됩니다.
         thumbs.keys.toList().forEach { if (it !in liveIds && -it !in liveIds) thumbs.remove(it)?.recycle() }
         val cur = active
@@ -467,9 +519,21 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             gravity = Gravity.CENTER_VERTICAL
             val pad = Ui.dp(ctx, 6f)
             setPadding(pad + Ui.dp(ctx, 14f) * info.depth, pad, pad, pad)
-            background = Ui.rounded(if (info.id == activeId) Ui.ROW_ON else 0x00000000, Ui.dp(ctx, 6f).toFloat())
+            background = if (multi && info.id in picked) {
+                Ui.rounded(Ui.ROW_ON, Ui.dp(ctx, 6f).toFloat(), Ui.dp(ctx, 2f), Ui.BUTTON_ON)
+            } else {
+                Ui.rounded(if (info.id == activeId) Ui.ROW_ON else 0x00000000, Ui.dp(ctx, 6f).toFloat())
+            }
             isClickable = true
-            setOnClickListener { renderer.selectNode(info.id) }
+            setOnClickListener {
+                if (multi) {
+                    if (!picked.remove(info.id)) picked.add(info.id)
+                    refreshMulti()
+                    rebuildList()
+                } else {
+                    renderer.selectNode(info.id)
+                }
+            }
             setOnLongClickListener { rename(info); true }
         }
         // 오른쪽 끝 손잡이를 끌어 순서 바꾸기 (놓을 때 몇 칸 움직였는지로 이동)

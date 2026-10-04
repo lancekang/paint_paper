@@ -570,6 +570,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
     /** true면 합성에서 밑그림 레이어를 뺌 (내보내기·채우기 참조용으로 잠깐만) */
     private var hideDrafts = false
+    /** null이 아니면 합성에 이 id들만 씀 (선택한 레이어 합치기용으로 잠깐만) */
+    private var composeOnly: Set<Int>? = null
 
     /** 밑그림을 뺀 합성 결과. 밑그림이 없으면 평소 합성 그대로. 화면용 합성은 다음 프레임에 다시 만듭니다. */
     private fun cleanComposite(d: Document): ByteBuffer {
@@ -1150,6 +1152,111 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 // 맨 위(루트의 끝)에 넣어야 그 위에 덮이는 레이어가 없음
                 insert(doc.root, doc.root.children.size, n)
             }
+            n.id
+        }
+        val s = surfaces[d.activeId] ?: return@post
+        if (s.tileCount == 0) tiles.forEach { (k, b) -> s.write(k, b) }
+        thumbQueue.add(d.activeId)
+        belowValid = false
+        markAllDirty()
+    }
+
+    /** [ids] 중 조상이 함께 골라지지 않은 것들 (쌓인 순서: 아래 → 위) */
+    private fun selRoots(d: Document, ids: Collection<Int>): List<Node> {
+        val set = ids.toSet()
+        return d.allNodes().filter { n -> n.id in set && generateSequence(n.parent) { it.parent }.none { it.id in set } }
+    }
+
+    /** 여러 레이어를 한꺼번에 지웁니다 (실행취소 한 단계). */
+    fun deleteNodes(ids: Collection<Int>) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val roots = selRoots(d, ids)
+        if (roots.isEmpty()) return@post
+        val left = d.allNodes().count { n -> n.isRaster && roots.none { it === n || it.isAncestorOf(n) } }
+        if (left == 0) {
+            reportError("레이어가 하나는 있어야 합니다.")
+            return@post
+        }
+        structural { doc ->
+            val top = roots.last()
+            val parent = top.parent
+            // 지운 맨 위 레이어 바로 아래에 남는 형제를 고름
+            val below = parent?.children?.subList(0, top.index)?.lastOrNull { c -> roots.none { it === c } }
+            for (n in roots) n.parent?.children?.remove(n)
+            val next = below ?: parent?.children?.lastOrNull() ?: parent?.takeIf { it.id != ROOT_ID }
+            next?.id ?: doc.allNodes().firstOrNull { it.isRaster }?.id
+        }
+    }
+
+    /** 여러 레이어를 새 폴더 하나로 묶습니다 (맨 위 레이어 자리에, 쌓인 순서 유지). */
+    fun groupNodes(ids: Collection<Int>) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val roots = selRoots(d, ids)
+        if (roots.isEmpty()) return@post
+        structural { doc ->
+            val top = roots.last()
+            val parent = top.parent ?: return@structural null
+            val f = Node(doc.newId(), NodeKind.FOLDER, LayerProps(doc.nextFolderName(), blend = BlendMode.PASS_THROUGH))
+            insert(parent, top.index + 1, f)
+            for (n in roots) {
+                n.parent?.children?.remove(n)
+                n.props = n.props.copy(clip = false)
+                insert(f, f.children.size, n)
+            }
+            f.id
+        }
+    }
+
+    /** 고른 레이어들을 보이는 그대로 한 장으로 합칩니다 (맨 위 레이어 자리에). */
+    fun mergeNodes(ids: Collection<Int>) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val roots = selRoots(d, ids)
+        if (roots.size < 2) {
+            reportError("합칠 레이어를 두 개 이상 고르세요.")
+            return@post
+        }
+        if (roots.any { it.isFolder && it.props.animation }) {
+            reportError("애니메이션 폴더는 합칠 수 없습니다.")
+            return@post
+        }
+        // 고른 것 + 그 조상(폴더 효과) + 후손(폴더 내용)만 합성
+        val allowed = HashSet<Int>()
+        for (n in roots) {
+            allowed.add(n.id)
+            generateSequence(n.parent) { it.parent }.forEach { allowed.add(it.id) }
+            d.allNodes().filter { n.isAncestorOf(it) }.forEach { allowed.add(it.id) }
+        }
+        // 결과가 들어갈 폴더(맨 위 레이어의 조상)의 효과는 결과 레이어에 다시 적용되므로, 합성할 때는 잠깐 끔
+        val neutral = generateSequence(roots.last().parent) { it.parent }.filter { it.id != ROOT_ID }.toList()
+        val savedProps = neutral.map { it.props }
+        val keepPlaying = animPlaying
+        animPlaying = true
+        composeOnly = allowed
+        for (a in neutral) a.props = LayerProps(a.props.name, blend = BlendMode.PASS_THROUGH, visible = a.props.visible)
+        belowValid = false
+        markAllDirty()
+        val tiles = try {
+            ensureComposite(d)
+            splitToTiles(d, compResult!!.readAll())
+        } catch (e: OutOfMemoryError) {
+            reportError("메모리가 부족해 합치지 못했습니다.")
+            return@post
+        } finally {
+            neutral.forEachIndexed { i, a -> a.props = savedProps[i] }
+            animPlaying = keepPlaying
+            composeOnly = null
+            belowValid = false
+            markAllDirty()
+        }
+        structural { doc ->
+            val top = roots.last()
+            val parent = top.parent ?: return@structural null
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(top.props.name))
+            insert(parent, top.index + 1, n)
+            for (x in roots) x.parent?.children?.remove(x)
             n.id
         }
         val s = surfaces[d.activeId] ?: return@post
@@ -3311,8 +3418,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             var j = i + 1
             while (j < to && nodes[j].isRaster && nodes[j].props.clip) j++
             val p = n.props
-            if (p.visible && p.opacity > 0f && !(hideDrafts && p.draft)) {
-                val clipped = nodes.subList(i + 1, j).filter { it.props.visible && it.props.opacity > 0f && !(hideDrafts && it.props.draft) }
+            val only = composeOnly
+            if (p.visible && p.opacity > 0f && !(hideDrafts && p.draft) && (only == null || n.id in only)) {
+                val clipped = nodes.subList(i + 1, j).filter {
+                    it.props.visible && it.props.opacity > 0f && !(hideDrafts && it.props.draft) && (only == null || it.id in only)
+                }
                 if (clipped.isEmpty()) {
                     composeNode(n, t, r, depth)
                 } else {
