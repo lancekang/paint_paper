@@ -2109,7 +2109,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val png = tips.text("PNG 이미지 (한 장으로 합침)", Action.FILE_EXPORT_PNG)
         val psd = tips.text("PSD (레이어·폴더 유지 · 클립 스튜디오/포토샵)", Action.FILE_EXPORT_PSD)
         val list = arrayListOf(png, psd, "JPEG / 크기 바꿔 내보내기…")
-        if (animExists && animCount > 0) list.add("애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)")
+        if (animExists && animCount > 0) {
+            list.add("애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)")
+            list.add("애니메이션 MP4 동영상 (${animCount}프레임 · ${settings.animFps}fps)")
+        }
         Ui.dialog(this)
             .setTitle("내보내기")
             .setItems(list.toTypedArray()) { _, which ->
@@ -2117,7 +2120,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                     0 -> { exportFormat = 0; exportScale = 100; exportPng() }
                     1 -> exportPsd()
                     2 -> chooseImageExport()
-                    else -> exportGif()
+                    3 -> exportGif()
+                    else -> exportMp4()
                 }
             }
             .setNegativeButton("취소", null)
@@ -2228,6 +2232,75 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                     } catch (e: Exception) {
                         Log.e(TAG, "gif export failed", e)
                         fail("GIF로 내보내지 못했습니다: ${e.message}")
+                    }
+                }
+            }
+        }
+        step(0)
+    }
+
+    private fun exportMp4() {
+        stopPlayback()
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_TITLE, (currentUri?.let { displayName(it)?.substringBeforeLast('.') } ?: "애니메이션") + ".mp4")
+        }
+        startActivityForResult(intent, REQ_EXPORT_MP4)
+    }
+
+    /** GIF와 같은 방식으로 한 장씩: 흰 바탕에 합치고 긴 변 최대 MP4_MAX, 짝수 크기로 맞춰 H.264로 */
+    private fun writeMp4(uri: Uri) {
+        val count = animCount
+        if (count <= 0) return
+        showHud("MP4로 내보내는 중… 0 / $count")
+        val pfd = try {
+            contentResolver.openFileDescriptor(uri, "rw") ?: throw IllegalStateException("파일을 열 수 없습니다.")
+        } catch (e: Exception) {
+            Toast.makeText(this, "MP4로 내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        var encoder: kr.dfluid.paint.document.Mp4Encoder? = null
+        val fps = settings.animFps
+        fun fail(msg: String) {
+            encoder?.abort()
+            try { pfd.close() } catch (_: Exception) {}
+            ui.post { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+        }
+        fun step(i: Int) {
+            renderer.captureFrame(i) { w, h, buf ->
+                if (buf == null) { fail("MP4로 내보내지 못했습니다 (메모리 부족이거나 애니메이션이 없습니다)."); return@captureFrame }
+                io.execute {
+                    try {
+                        val full = ProjectIO.toBitmap(w, h, buf)
+                        val s = minOf(1f, MP4_MAX.toFloat() / maxOf(w, h))
+                        // H.264는 짝수 크기여야 함
+                        val vw = maxOf(2, (Math.round(w * s) / 2) * 2)
+                        val vh = maxOf(2, (Math.round(h * s) / 2) * 2)
+                        val frame = android.graphics.Bitmap.createBitmap(vw, vh, android.graphics.Bitmap.Config.ARGB_8888)
+                        android.graphics.Canvas(frame).apply {
+                            drawColor(Color.WHITE)
+                            drawBitmap(full, null, android.graphics.Rect(0, 0, vw, vh), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+                        }
+                        full.recycle()
+                        val px = IntArray(vw * vh)
+                        frame.getPixels(px, 0, vw, 0, 0, vw, vh)
+                        frame.recycle()
+                        val enc = encoder ?: kr.dfluid.paint.document.Mp4Encoder(pfd.fileDescriptor, vw, vh, fps).also { encoder = it }
+                        enc.addFrame(px)
+                        if (i + 1 < count) {
+                            ui.post { showHud("MP4로 내보내는 중… ${i + 1} / $count") }
+                            step(i + 1)
+                        } else {
+                            enc.finish()
+                            pfd.close()
+                            ui.post { showHud("MP4로 내보냈습니다 (${vw}×$vh · ${count}프레임 · ${fps}fps)") }
+                        }
+                    } catch (e: OutOfMemoryError) {
+                        fail("메모리가 부족해 MP4로 내보내지 못했습니다.")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "mp4 export failed", e)
+                        fail("MP4로 내보내지 못했습니다: ${e.message}")
                     }
                 }
             }
@@ -2346,6 +2419,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             REQ_EXPORT -> writePng(uri)
             REQ_EXPORT_PSD -> writePsd(uri)
             REQ_EXPORT_GIF -> writeGif(uri)
+            REQ_EXPORT_MP4 -> writeMp4(uri)
             REQ_IMPORT_LAYER -> readImageLayer(uri)
             REQ_BRUSH_EXPORT -> {
                 val b = pendingBrushExport ?: return
@@ -2640,6 +2714,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_IMPORT_LAYER = 17
         private const val REQ_BRUSH_EXPORT = 18
         private const val REQ_BRUSH_IMPORT = 19
+        private const val REQ_EXPORT_MP4 = 20
+        /** MP4 긴 변 최대 크기 (px) */
+        private const val MP4_MAX = 1280
         /** 자동 저장 기록 개수 */
         private const val AUTOSAVE_KEEP = 5
         /** GIF 긴 변 최대 크기 (px) */
