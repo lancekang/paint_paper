@@ -81,7 +81,15 @@ object BrushEditor {
             sizeRow.value.text = "${b.size.roundToInt()}px"
         }
         root.addView(sizeRow.view)
-        param("불투명도", 0.01f, 1f, { b.opacity }, { b.opacity = it }, pct)
+        if (b.isBlend) {
+            root.addView(Switch(ctx).apply {
+                text = "흐리기 (끄면 손끝: 지나온 색을 끌고 감)"
+                setTextColor(Ui.TEXT)
+                isChecked = b.mixMode == Brush.MIX_BLUR
+                setOnCheckedChangeListener { _, c -> b.mixMode = if (c) Brush.MIX_BLUR else Brush.MIX_SMUDGE }
+            })
+        }
+        param(if (b.isBlend) "강도" else "불투명도", 0.01f, 1f, { b.opacity }, { b.opacity = it }, pct)
         param("흐름", 0.01f, 1f, { b.flow }, { b.flow = it }, pct)
         param("경도", 0f, 1f, { b.hardness }, { b.hardness = it }, pct)
         param("간격", 0.02f, 2f, { b.spacing }, { b.spacing = it }, pct)

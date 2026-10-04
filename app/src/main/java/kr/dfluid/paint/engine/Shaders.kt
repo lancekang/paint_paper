@@ -314,6 +314,61 @@ void main() {
 }
 """
 
+    /**
+     * 색 혼합 스탬프 (STAMP_VS, 인스턴스 1개). 작업 버퍼에 블렌딩 없이 그립니다.
+     * u_patch = 작업 버퍼 일부를 복사해 둔 텍스처 (왼쪽 위 = u_origin 캔버스 px, 크기 u_psize).
+     * 손끝(u_mode 0): 직전 스탬프 자리(u_shift = 직전 − 지금)의 색을 끌어옴. 흐리기(1): 둘레 평균.
+     * k = 스탬프 모양 × 알파 × 강도 (× 선택 영역). 결과 = mix(지금 색, 가져온 색, k).
+     */
+    const val SMUDGE_FS = """#version 300 es
+precision highp float;
+in vec2 v_local;
+in float v_alpha;
+in float v_aa;
+in vec2 v_canvasPos;
+uniform float u_hardness;
+uniform sampler2D u_patch;
+uniform vec2 u_origin;
+uniform vec2 u_psize;
+uniform vec2 u_shift;
+uniform int u_mode;
+uniform float u_strength;
+uniform float u_blurR;
+uniform vec2 u_canvas;
+uniform sampler2D u_sel;
+uniform int u_useSel;
+uniform int u_lock;
+out vec4 o;
+void main() {
+    vec2 uv = (v_canvasPos - u_origin) / u_psize;
+    vec4 cur = texture(u_patch, uv);
+    float d = length(v_local);
+    float w = max(v_aa, 1.0 - u_hardness);
+    float a = clamp((1.0 - d) / w, 0.0, 1.0);
+    a = a * a * (3.0 - 2.0 * a);
+    float k = a * v_alpha * u_strength;
+    if (u_useSel == 1) k *= texture(u_sel, v_canvasPos / u_canvas).r;
+    vec4 src;
+    if (u_mode == 0) {
+        src = texture(u_patch, uv + u_shift / u_psize);
+    } else {
+        src = cur;
+        for (int i = 0; i < 12; i++) {
+            float ang = float(i) * 0.5235988;
+            float r = (i % 2 == 0) ? u_blurR : u_blurR * 0.5;
+            src += texture(u_patch, uv + vec2(cos(ang), sin(ang)) * r / u_psize);
+        }
+        src /= 13.0;
+    }
+    vec4 outc = mix(cur, src, k);
+    if (u_lock == 1) {
+        vec3 c = outc.a > 0.0 ? outc.rgb / outc.a : (cur.a > 0.0 ? cur.rgb / cur.a : vec3(0.0));
+        outc = vec4(clamp(c, 0.0, 1.0) * cur.a, cur.a);
+    }
+    o = outc;
+}
+"""
+
     /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
     const val DISPLAY_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;

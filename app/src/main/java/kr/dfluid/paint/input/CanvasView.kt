@@ -397,7 +397,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         if (sym.on) {
             val cx = viewport.canvasW / 2f
             val cy = viewport.canvasH / 2f
-            for (m in sym.mirror(stamps, cx, cy)) renderer.addStamps(m)
+            sym.mirror(stamps, cx, cy).forEachIndexed { i, m -> renderer.addStamps(m, i + 1) }
         }
     }
 

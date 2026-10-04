@@ -120,6 +120,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         private set
     /** 마스크 적용용 임시 버퍼 (캔버스 크기, 필요할 때 만듦) */
     private var maskTmp: RenderTarget? = null
+    /** 색 혼합: 작업 버퍼(캔버스 크기)와 스탬프 둘레 복사본 (필요할 때 만듦) */
+    private var smudgeBuf: RenderTarget? = null
+    private var smudgePatch: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
     /** 앱 첫 실행 시 기본 캔버스의 배경색 (null = 투명). */
@@ -162,6 +165,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private sealed class Op {
         class Stroke(val brush: Brush, val color: FloatArray, val tipTex: Int) : Op() {
             var rect: IRect? = null
+        }
+
+        /**
+         * 색 혼합 획. work = 활성 레이어 복사본(캔버스 크기)을 스탬프마다 직접 고칩니다.
+         * prev = 대칭 복제본(채널)마다 직전 스탬프 위치.
+         */
+        class Smudge(val brush: Brush, val work: RenderTarget, val lock: Boolean) : Op() {
+            var rect: IRect? = null
+            val prev = HashMap<Int, FloatArray>()
         }
 
         class Gradient(val kind: Int, val c0: FloatArray, val c1: FloatArray, var p: FloatArray, val opacity: Float) : Op()
@@ -256,6 +268,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun beginStroke(brush: Brush, color: Int, tip: kr.dfluid.paint.brush.TipImage?) = post {
         val n = editableActive() ?: return@post
         finishOp()
+        if (brush.isBlend) {
+            beginSmudge(n, brush)
+            return@post
+        }
         val tipTex = if (tip != null) ensureTip(tip) else 0
         val c = premul(color, 1f)
         strokeBuf!!.clear()
@@ -263,7 +279,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (!n.props.visible) main.post { listener.onRendererError("숨겨진 레이어에 그리고 있습니다.") }
     }
 
-    fun addStamps(stamps: FloatArray) = post {
+    /** [channel] = 대칭 복제본 번호 (0 = 원본). 색 혼합이 복제본마다 직전 위치를 따로 기억합니다. */
+    fun addStamps(stamps: FloatArray, channel: Int = 0) = post {
+        (op as? Op.Smudge)?.let { smudgeStamps(it, stamps, channel); return@post }
         val o = op as? Op.Stroke ?: return@post
         val d = doc ?: return@post
         brushEngine.draw(strokeBuf!!, stamps, o.brush, o.tipTex)
@@ -310,6 +328,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun endStroke() = post { finishOp() }
 
     fun cancelStroke() = post {
+        (op as? Op.Smudge)?.let { s ->
+            op = null
+            s.rect?.let { markDirty(it) }
+            return@post
+        }
         val o = op as? Op.Stroke ?: return@post
         op = null
         o.rect?.let { markDirty(it) }
@@ -1148,6 +1171,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             if (t != null) buffers += t.width.toLong() * t.height * t.bytesPerPixel
         }
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
+        add(smudgeBuf); add(smudgePatch)
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -1398,6 +1422,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         strokeBuf?.release(); selTex?.release(); preview?.release(); belowCache?.release()
         tileTmp?.release(); thumbTarget?.release()
         maskTmp?.release(); maskTmp = null
+        smudgeBuf?.release(); smudgeBuf = null
+        smudgePatch?.release(); smudgePatch = null
         maskEditing = false
         pairs.forEach { it.release() }
         pairs.clear()
@@ -1422,6 +1448,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         strokeBuf = null; selTex = null; preview = null; belowCache = null; compResult = null
         tileTmp = null; thumbTarget = null
         maskTmp = null
+        smudgeBuf = null
+        smudgePatch = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
@@ -1487,6 +1515,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             is Op.Transform -> commitTransformGl(o, d)
             is Op.Filter -> commitFilterGl(o, d)
+            is Op.Smudge -> {
+                op = null
+                commitSmudge(o, d)
+            }
             null -> Unit
         }
     }
@@ -1499,7 +1531,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             is Op.Transform -> endTransform(o)
             is Op.Filter -> endFilter(o)
-            is Op.Stroke -> finishOp()
+            is Op.Stroke, is Op.Smudge -> finishOp()
             null -> Unit
         }
     }
@@ -1750,6 +1782,110 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         op = null
         markAllDirty()
         main.post { listener.onTransformEnded() }
+    }
+
+    // ---- 색 혼합 ----
+
+    private fun beginSmudge(n: Node, brush: Brush) {
+        val d = doc ?: return
+        if (isMaskEdit(n)) {
+            reportError("마스크에는 색 혼합 도구를 쓸 수 없습니다.")
+            return
+        }
+        val s = surfaces[n.id] ?: return
+        val work = smudgeBuf ?: RenderTarget(d.width, d.height).also { smudgeBuf = it }
+        work.clear()
+        work.bind()
+        GlState.off()
+        drawSourceCopy(Src.Tiles(s), 1f, IRect(0, 0, d.width, d.height))
+        op = Op.Smudge(brush, work, n.props.alphaLock)
+        if (!n.props.visible) main.post { listener.onRendererError("숨겨진 레이어에 그리고 있습니다.") }
+    }
+
+    /** 스탬프마다: 둘레를 patch로 복사 → 작업 버퍼에 섞어 그림. */
+    private fun smudgeStamps(o: Op.Smudge, stamps: FloatArray, channel: Int) {
+        val d = doc ?: return
+        val count = stamps.size / StrokeBuilder.FLOATS
+        val sel = selTexIfAny()
+        for (i in 0 until count) {
+            val b = i * StrokeBuilder.FLOATS
+            val x = stamps[b]
+            val y = stamps[b + 1]
+            val rad = stamps[b + 2]
+            val prev = o.prev[channel]
+            o.prev[channel] = floatArrayOf(x, y)
+            // 손끝은 직전 위치가 있어야 끌고 올 색이 있습니다.
+            if (o.brush.mixMode == Brush.MIX_SMUDGE && prev == null) continue
+            val px = prev?.get(0) ?: x
+            val py = prev?.get(1) ?: y
+            // 스탬프 사각형(회전 포함) 반경 + 가져올 범위
+            val reach = (rad + 1f) * 1.42f + 2f
+            val extra = if (o.brush.mixMode == Brush.MIX_BLUR) rad * 0.5f + 1f else 0f
+            val stampRect = IRect.ofBounds(x - reach, y - reach, x + reach, y + reach, d.width, d.height) ?: continue
+            var src = IRect.ofBounds(x - reach - extra, y - reach - extra, x + reach + extra, y + reach + extra, d.width, d.height) ?: continue
+            if (o.brush.mixMode == Brush.MIX_SMUDGE) {
+                IRect.ofBounds(px - reach, py - reach, px + reach, py + reach, d.width, d.height)?.let { src = src.union(it) }
+            }
+            val patch = ensurePatch(src.w, src.h)
+            // patch ← 작업 버퍼의 src 영역 (뷰포트를 밀어 캔버스 좌표계로)
+            GlState.bindFbo(patch.fbo)
+            GLES20.glViewport(-src.x, -src.y, d.width, d.height)
+            GlState.noScissor()
+            GLES20.glClearColor(0f, 0f, 0f, 0f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GlState.off()
+            GlState.scissor(0, 0, src.w, src.h)
+            compositor.drawCopy(o.work.tex, 1f)
+            GlState.noScissor()
+            // 작업 버퍼에 섞기
+            o.work.bind()
+            GlState.scissor(stampRect)
+            GlState.off()
+            brushEngine.drawSmudge(o.work, stamps, i, o.brush, patch, src.x, src.y, px - x, py - y, sel, o.lock)
+            GlState.noScissor()
+            o.rect = stampRect.union(o.rect)
+            markDirty(stampRect)
+        }
+    }
+
+    /** 최소 w×h인 patch 버퍼 (작으면 2배씩 키워 다시 만듦). 선형 보간으로 읽습니다. */
+    private fun ensurePatch(w: Int, h: Int): RenderTarget {
+        val cur = smudgePatch
+        if (cur != null && cur.width >= w && cur.height >= h) return cur
+        cur?.release()
+        var nw = max(cur?.width ?: 128, 128)
+        var nh = max(cur?.height ?: 128, 128)
+        while (nw < w) nw *= 2
+        while (nh < h) nh *= 2
+        val p = RenderTarget(min(nw, maxTextureSize), min(nh, maxTextureSize))
+        p.setFilter(GLES20.GL_LINEAR, GLES20.GL_LINEAR)
+        smudgePatch = p
+        return p
+    }
+
+    private fun commitSmudge(o: Op.Smudge, d: Document) {
+        val rect = o.rect ?: return
+        val n = d.active?.takeIf { it.isRaster } ?: return
+        val s = surfaces[n.id] ?: return
+        val saved = HashMap<Int, ByteBuffer?>()
+        for (key in s.keysIntersecting(rect)) {
+            val r = rect.intersect(s.tileRect(key)) ?: continue
+            saved[key] = s.read(key)
+            val t = s.getOrCreate(key)
+            s.bindCanvasSpace(key, t)
+            s.scissorCanvasRect(key, r)
+            GlState.off()
+            compositor.drawCopy(o.work.tex, 1f)
+            GlState.noScissor()
+            s.dropIfEmpty(key)
+        }
+        saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
+        markDirty(rect)
+        if (saved.isEmpty()) return
+        history.push(TilesCommand(n.id, saved))
+        version++
+        thumbQueue.add(n.id)
+        notifyHistory()
     }
 
     // ---- 필터 ----
@@ -2255,6 +2391,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 GlState.over()
                 compositor.drawAffine(o.floating.tex, o.bounds.w, o.bounds.h, o.m, d.width, d.height, 1f)
             }
+            is Op.Smudge -> compositor.drawCopy(o.work.tex, 1f)
             is Op.Filter -> {
                 drawSourceCopy(Src.Tiles(s), 1f, r)
                 o.bounds.intersect(r)?.let { fr ->

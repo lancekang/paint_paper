@@ -10,6 +10,7 @@ enum class Tool(val label: String, val short: String, val isBrush: Boolean) {
     AIRBRUSH("에어브러시", "에어", true),
     MARKER("마커", "마커", true),
     ERASER("지우개", "지우개", true),
+    BLEND("색 혼합", "혼합", true),
     SELECT("선택", "선택", false),
     MOVE("이동", "이동", false),
     FILL("채우기", "채우기", false),
@@ -42,6 +43,7 @@ enum class TipRotation(val label: String) {
  * @property curve 필압 곡선 제어점 [x0,y0,x1,y1,...] (0..1, x 오름차순)
  * @property taperIn 입: 시작부터 이 길이(캔버스 px) 동안 가늘게 시작 (0 = 끔)
  * @property taperOut 출: 끝에서 이 길이 동안 가늘게 끝남 (0 = 끔)
+ * @property mixMode 색 혼합 도구만: MIX_SMUDGE(손끝, 지나온 색을 끌고 감) / MIX_BLUR(흐리기)
  */
 data class Brush(
     val id: String,
@@ -68,8 +70,11 @@ data class Brush(
     var curve: FloatArray = floatArrayOf(0f, 0f, 1f, 1f),
     var taperIn: Float = 0f,
     var taperOut: Float = 0f,
+    var mixMode: Int = MIX_SMUDGE,
 ) {
     val isEraser: Boolean get() = tool == Tool.ERASER
+    /** 색을 칠하지 않고 레이어의 색을 섞는 도구 */
+    val isBlend: Boolean get() = tool == Tool.BLEND
 
     /** 필압 곡선 룩업 테이블 (256). 곡선을 바꾸면 invalidateCurve() */
     @Transient
@@ -116,6 +121,7 @@ data class Brush(
         .put("curve", JSONArray(curve.map { it.toDouble() }))
         .put("taperIn", taperIn.toDouble())
         .put("taperOut", taperOut.toDouble())
+        .put("mixMode", mixMode)
 
     override fun equals(other: Any?): Boolean = other is Brush && other.toJson().toString() == toJson().toString()
     override fun hashCode(): Int = id.hashCode()
@@ -125,6 +131,8 @@ data class Brush(
         const val MAX_SIZE = 1000f
         /** 입·출 최대 길이 (캔버스 px) */
         const val TAPER_MAX = 400f
+        const val MIX_SMUDGE = 0
+        const val MIX_BLUR = 1
 
         fun fromJson(o: JSONObject): Brush? {
             val tool = Tool.entries.firstOrNull { it.name == o.optString("tool") } ?: return null
@@ -158,6 +166,7 @@ data class Brush(
                 curve = curve,
                 taperIn = f("taperIn", 0f).coerceIn(0f, TAPER_MAX),
                 taperOut = f("taperOut", 0f).coerceIn(0f, TAPER_MAX),
+                mixMode = o.optInt("mixMode", base.mixMode).coerceIn(MIX_SMUDGE, MIX_BLUR),
             )
         }
     }
@@ -188,6 +197,10 @@ object BrushPresets {
             id(), tool, "딱딱함", size = 40f, opacity = 1f, flow = 1f, hardness = 0.8f, spacing = 0.08f,
             pressureSize = 0.7f, pressureOpacity = 0f, minSizeRatio = 0.3f,
         )
+        Tool.BLEND -> Brush(
+            id(), tool, "손끝", size = 40f, opacity = 0.8f, flow = 1f, hardness = 0.3f, spacing = 0.12f,
+            pressureSize = 0.5f, pressureOpacity = 1f, minSizeRatio = 0.5f, mixMode = Brush.MIX_SMUDGE,
+        )
         else -> Brush(
             id(), tool, tool.label, size = 1f, opacity = 1f, flow = 1f, hardness = 1f, spacing = 0.1f,
             pressureSize = 0f, pressureOpacity = 0f, minSizeRatio = 1f,
@@ -210,6 +223,11 @@ object BrushPresets {
             create(tool).copy(id = id(), name = "강하게", flow = 0.15f, hardness = 0.3f),
         )
         Tool.MARKER -> listOf(create(tool))
+        Tool.BLEND -> listOf(
+            create(tool),
+            create(tool).copy(id = id(), name = "색 늘이기", opacity = 1f, hardness = 0.6f, pressureOpacity = 0.4f),
+            create(tool).copy(id = id(), name = "흐리기", size = 60f, opacity = 0.6f, hardness = 0f, mixMode = Brush.MIX_BLUR),
+        )
         Tool.ERASER -> listOf(
             create(tool),
             create(tool).copy(id = id(), name = "부드러움", hardness = 0f, size = 120f, pressureSize = 0f, pressureOpacity = 1f, flow = 0.3f, buildUp = true),

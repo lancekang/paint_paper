@@ -159,7 +159,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         view.addView(actions, lp(6f))
 
         val size = Ui.SliderRow(ctx, "크기", 1000)
-        val op = Ui.SliderRow(ctx, "불투명도", 100)
+        val op = Ui.SliderRow(ctx, if (tool == Tool.BLEND) "강도" else "불투명도", 100)
         val hard = Ui.SliderRow(ctx, "경도", 100)
         val smooth = Ui.SliderRow(ctx, "손떨림 보정", 100)
         val tIn = Ui.SliderRow(ctx, "입 (시작)", Brush.TAPER_MAX.toInt())
