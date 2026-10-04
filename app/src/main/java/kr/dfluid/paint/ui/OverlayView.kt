@@ -46,6 +46,23 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     private var gradient: FloatArray? = null
 
     // ---- 대칭 안내선 ----
+    // 패널을 끌 때 스냅 안내선 (화면 좌표)
+    private var layoutGuideX: Float? = null
+    private var layoutGuideY: Float? = null
+    private val layoutGuide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = Ui.dp(context, 1.5f).toFloat()
+        color = 0xFF2F6BD8.toInt()
+        pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+    }
+
+    fun showLayoutGuides(x: Float?, y: Float?) {
+        if (x == layoutGuideX && y == layoutGuideY) return
+        layoutGuideX = x
+        layoutGuideY = y
+        invalidate()
+    }
+
     /** 원근 자·동심원 자 (MainActivity가 연결) */
     var ruler: kr.dfluid.paint.input.GuideRuler? = null
 
@@ -330,6 +347,8 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     // =====================================================================
 
     override fun onDraw(canvas: Canvas) {
+        layoutGuideX?.let { canvas.drawLine(it, 0f, it, height.toFloat(), layoutGuide) }
+        layoutGuideY?.let { canvas.drawLine(0f, it, width.toFloat(), it, layoutGuide) }
         if (symMode != SymMode.OFF) drawSymmetry(canvas)
         ruler?.takeIf { it.on }?.let { drawRuler(canvas, it) }
         selShape?.let { drawSelectionGuide(canvas, it) }

@@ -122,6 +122,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private val toolButtons = HashMap<Tool, ImageView>()
     private lateinit var tips: Ui.Tips
     private lateinit var rootView: FrameLayout
+    private var panels: FloatingPanels? = null
     private lateinit var toolCard: Ui.Card
     private lateinit var colorCard: Ui.Card
     private lateinit var layerCard: Ui.Card
@@ -349,6 +350,11 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
+        val topGrip = FloatingPanels.Grip(ctx, horizontal = false)
+        bar.addView(topGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 16f), Ui.dp(ctx, 40f)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            rightMargin = Ui.dp(ctx, 2f)
+        })
         bar.addView(titleLabel)
         var group = LinearLayout(ctx)
         fun group(label: String): TextView {
@@ -411,9 +417,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             isHorizontalScrollBarEnabled = false
             addView(bar)
         }
-        root.addView(topBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
-            setMargins(m, m, m, 0)
-        })
+        // 위치는 FloatingPanels가 view.x/y로 정합니다 (기본: 가로 가운데, 위).
+        root.addView(topBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
         // ---- 왼쪽 도구 막대: 그리기 / 선택·이동 / 칠하기 / 기타로 나눔 ----
         val tools = LinearLayout(ctx).apply {
@@ -422,6 +427,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             setPadding(m / 2, m / 2 + 2, m / 2, m)
             background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
         }
+        val toolGrip = FloatingPanels.Grip(ctx, horizontal = true)
+        tools.addView(toolGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 40f), Ui.dp(ctx, 16f)))
         val groups = listOf(
             listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER),
             listOf(Tool.SELECT, Tool.MOVE),
@@ -452,12 +459,18 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             isVerticalScrollBarEnabled = false
             addView(tools)
         }
-        root.addView(toolBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-            setMargins(m, Ui.dp(ctx, 72f), 0, m)
-        })
+        // 기본: 왼쪽, 세로 가운데
+        root.addView(toolBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
         // ---- 오른쪽 패널: 카드 3장 (도구 속성 / 색 / 레이어) ----
         val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val panelGrip = FloatingPanels.Grip(ctx, horizontal = true).apply {
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+        }
+        panel.addView(panelGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 56f), Ui.dp(ctx, 18f)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = Ui.dp(ctx, 4f)
+        })
         toolCard = Ui.Card(ctx, "도구 속성", settings.cardToolOpen) { open -> settings.cardToolOpen = open; relayoutCards() }
         toolOptions.titleView = toolCard.titleView
         toolCard.body.addView(ScrollView(ctx).apply {
@@ -486,9 +499,25 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         panel.addView(layerCard.view)
         rightPanel = panel
         relayoutCards()
-        root.addView(rightPanel, FrameLayout.LayoutParams(Ui.dp(ctx, 300f), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
-            setMargins(m, Ui.dp(ctx, 72f), m, m)
+        // 오른쪽 패널은 가로로만 옮깁니다 (세로는 상단 바 아래 ~ 화면 아래).
+        root.addView(rightPanel, FrameLayout.LayoutParams(Ui.dp(ctx, 300f), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP or Gravity.START).apply {
+            setMargins(0, Ui.dp(ctx, 66f), 0, m)
         })
+
+        // ---- 패널 끌어 옮기기 + 스냅 ----
+        panels?.detach()
+        val fp = FloatingPanels(root) { x, y -> overlay.showLayoutGuides(x, y) }
+        panels = fp
+        fp.add(topBar, topGrip, moveY = true, settings.topBarFx, settings.topBarFy) { fx, fy ->
+            settings.topBarFx = fx; settings.topBarFy = fy; settings.save()
+        }
+        fp.add(toolBar, toolGrip, moveY = true, settings.toolBarFx, settings.toolBarFy) { fx, fy ->
+            settings.toolBarFx = fx; settings.toolBarFy = fy; settings.save()
+        }
+        fp.add(rightPanel, panelGrip, moveY = false, settings.rightPanelFx, 0f) { fx, _ ->
+            settings.rightPanelFx = fx; settings.save()
+        }
+        if (settings.panelLock) listOf(topGrip, toolGrip, panelGrip).forEach { it.visibility = View.GONE }
 
         // ---- 변형 확정/취소 바 ----
         val tb = LinearLayout(ctx).apply {
@@ -1157,7 +1186,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     private fun showSettings() {
-        Dialogs.settings(this, settings, onChanged = { settings.save() }, onOpenShortcuts = { openShortcutSettings() }, onThemeChanged = { rebuildUi() })
+        Dialogs.settings(this, settings, onChanged = { settings.save() }, onOpenShortcuts = { openShortcutSettings() }, onThemeChanged = { rebuildUi() }, onPanelsChanged = { rebuildUi() })
     }
 
     // =====================================================================

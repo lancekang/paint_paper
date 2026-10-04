@@ -43,6 +43,18 @@ class AppSettings(context: Context) {
     var cardToolOpen = true
     var cardColorOpen = true
     var cardLayerOpen = true
+    /** 떠 있는 패널 위치 (남는 공간 중 비율: 0 = 왼쪽/위, 0.5 = 가운데, 1 = 오른쪽/아래) */
+    var topBarFx = 0.5f
+    var topBarFy = 0f
+    var toolBarFx = 0f
+    var toolBarFy = 0.5f
+    var rightPanelFx = 1f
+    /** 패널 위치 잠금 (손잡이 숨김) */
+    var panelLock = false
+
+    fun resetPanels() {
+        topBarFx = 0.5f; topBarFy = 0f; toolBarFx = 0f; toolBarFy = 0.5f; rightPanelFx = 1f
+    }
 
     init {
         pressureGamma = prefs.getFloat("pressureGamma", 1f)
@@ -71,6 +83,12 @@ class AppSettings(context: Context) {
         cardToolOpen = prefs.getBoolean("cardToolOpen", true)
         cardColorOpen = prefs.getBoolean("cardColorOpen", true)
         cardLayerOpen = prefs.getBoolean("cardLayerOpen", true)
+        topBarFx = prefs.getFloat("topBarFx", 0.5f)
+        topBarFy = prefs.getFloat("topBarFy", 0f)
+        toolBarFx = prefs.getFloat("toolBarFx", 0f)
+        toolBarFy = prefs.getFloat("toolBarFy", 0.5f)
+        rightPanelFx = prefs.getFloat("rightPanelFx", 1f)
+        panelLock = prefs.getBoolean("panelLock", false)
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
     }
 
@@ -115,6 +133,12 @@ class AppSettings(context: Context) {
             .putBoolean("cardToolOpen", cardToolOpen)
             .putBoolean("cardColorOpen", cardColorOpen)
             .putBoolean("cardLayerOpen", cardLayerOpen)
+            .putFloat("topBarFx", topBarFx)
+            .putFloat("topBarFy", topBarFy)
+            .putFloat("toolBarFx", toolBarFx)
+            .putFloat("toolBarFy", toolBarFy)
+            .putFloat("rightPanelFx", rightPanelFx)
+            .putBoolean("panelLock", panelLock)
             .apply()
     }
 

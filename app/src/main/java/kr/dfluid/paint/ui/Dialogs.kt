@@ -183,7 +183,7 @@ object Dialogs {
             .show()
     }
 
-    fun settings(ctx: Context, s: AppSettings, onChanged: () -> Unit, onOpenShortcuts: () -> Unit, onThemeChanged: () -> Unit) {
+    fun settings(ctx: Context, s: AppSettings, onChanged: () -> Unit, onOpenShortcuts: () -> Unit, onThemeChanged: () -> Unit, onPanelsChanged: () -> Unit) {
         val pad = Ui.dp(ctx, 20f)
         // 감마 0.3 ~ 3.0 을 로그 스케일 슬라이더로
         val gamma = Ui.SliderRow(ctx, "필압 곡선", 100)
@@ -237,11 +237,42 @@ object Dialogs {
                 rightMargin = Ui.dp(ctx, 6f)
             })
         }
+        // 패널 배치
+        val panelRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "패널", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            val lock = Ui.button(ctx, "") {}
+            fun label() {
+                lock.text = if (s.panelLock) "위치 잠금 켜짐" else "위치 잠금 꺼짐"
+                Ui.setOn(lock, s.panelLock)
+            }
+            label()
+            lock.setOnClickListener {
+                s.panelLock = !s.panelLock
+                s.save()
+                label()
+                onPanelsChanged()
+            }
+            addView(lock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = Ui.dp(ctx, 6f)
+            })
+            addView(Ui.button(ctx, "위치 초기화") {
+                s.resetPanels()
+                s.save()
+                onPanelsChanged()
+            }, Ui.wrap())
+        }
+        val panelHint = Ui.text(ctx, "패널의 손잡이(⠿)를 끌어 옮길 수 있고, 화면 가장자리·가운데 근처에서 붙습니다.", 11f, Ui.SUBTEXT)
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, 0)
             addView(themeRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = Ui.dp(ctx, 12f)
+                bottomMargin = Ui.dp(ctx, 8f)
+            })
+            addView(panelRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(panelHint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = Ui.dp(ctx, 2f); bottomMargin = Ui.dp(ctx, 12f)
             })
             addView(gamma.view)
             addView(finger, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
