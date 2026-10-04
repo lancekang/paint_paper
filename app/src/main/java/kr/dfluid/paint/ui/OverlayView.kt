@@ -380,6 +380,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
                 addPolygon(corners, true)
             }
             SelShape.LASSO -> addPolygon(p, false)
+            SelShape.WAND -> return
         }
         canvas.drawPath(path, shadow)
         canvas.drawPath(path, dash)

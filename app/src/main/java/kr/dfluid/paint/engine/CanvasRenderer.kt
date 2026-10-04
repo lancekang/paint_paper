@@ -289,18 +289,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc ?: return@post
         val n = editableActive() ?: return@post
         finishOp()
-        val ref: ByteBuffer
-        if (opts.referenceAll) {
-            ensureComposite(d)
-            ref = compResult!!.readAll()
-        } else {
-            val pv = preview!!
-            pv.clear()
-            pv.bind()
-            drawSourceCopy(Src.Tiles(surfaces[n.id]!!), 1f, IRect(0, 0, d.width, d.height))
-            ref = pv.readAll()
-            markAllDirty() // preview 버퍼를 빌려 썼음
-        }
+        val ref = referenceImage(d, n, opts.referenceAll)
         val sel = if (hasSelection) selection?.toBuffer() else null
         val w = d.width
         val h = d.height
@@ -315,6 +304,61 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             } ?: return@execute
             post { applyFill(docRef, targetId, res, color, opacity) }
         }
+    }
+
+    /** 채우기·자동 선택이 참고할 이미지: 모든 레이어 합성 결과 또는 [n] 레이어만. */
+    private fun referenceImage(d: Document, n: Node, all: Boolean): ByteBuffer {
+        if (all) {
+            ensureComposite(d)
+            return compResult!!.readAll()
+        }
+        val pv = preview!!
+        pv.clear()
+        pv.bind()
+        drawSourceCopy(Src.Tiles(surfaces[n.id]!!), 1f, IRect(0, 0, d.width, d.height))
+        markAllDirty() // preview 버퍼를 빌려 썼음
+        return pv.readAll()
+    }
+
+    /**
+     * 자동 선택: (x, y)와 비슷한 색으로 이어진 영역을 [selOp]로 선택 영역에 합칩니다.
+     * 영역 계산은 채우기와 같은 [FloodFill]을 백그라운드에서 돌립니다.
+     */
+    fun selectByColor(x: Int, y: Int, opts: FillOptions, selOp: SelOp) = post {
+        val d = doc ?: return@post
+        if (op is Op.Transform) return@post
+        val n = if (opts.referenceAll) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive()
+        if (n == null) return@post
+        cancelPreviewOps()
+        val ref = referenceImage(d, n, opts.referenceAll)
+        val w = d.width
+        val h = d.height
+        val docRef = d
+        worker.execute {
+            val res = try {
+                FloodFill.run(ref, w, h, x, y, opts.tolerance, opts.gap, opts.expand, null)
+            } catch (e: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 자동 선택을 하지 못했습니다.") }
+                null
+            } ?: return@execute
+            post { applyWand(docRef, res, selOp) }
+        }
+    }
+
+    private fun applyWand(docRef: Document, res: FloodFill.Result, selOp: SelOp) {
+        val d = doc
+        if (d !== docRef) return
+        if (op != null) {
+            if (op is Op.Transform) return
+            main.postDelayed({ post { applyWand(docRef, res, selOp) } }, 60)
+            return
+        }
+        val before = selEncoded
+        val m = selection ?: SelectionMask(d.width, d.height).also { selection = it }
+        if (!hasSelection) m.clear()
+        // 선택이 없는데 빼기/교차면 결과도 없음 → 그대로 두면 됩니다 (select()와 같은 규칙).
+        m.applyMask(res.mask, selOp)
+        commitSelectionChange(before)
     }
 
     /** 채우기 결과 반영. 다른 작업(획·변형)이 진행 중이면 끝날 때까지 미룹니다. */

@@ -13,7 +13,8 @@ import java.nio.ByteBuffer
 
 enum class SelOp { REPLACE, ADD, SUBTRACT, INTERSECT }
 
-enum class SelShape { RECT, ELLIPSE, LASSO }
+/** WAND = 자동 선택(누른 곳과 비슷한 색의 영역). 도형이 아니라 [SelectionMask.applyMask]로 반영합니다. */
+enum class SelShape { RECT, ELLIPSE, LASSO, WAND }
 
 /**
  * 선택 영역 마스크 (CPU 원본, 캔버스 크기 ALPHA_8).
@@ -44,6 +45,30 @@ class SelectionMask(val width: Int, val height: Int) {
                 tmp.recycle()
             }
         }
+    }
+
+    /** w*h 바이트 마스크(0..255)를 선택 영역에 합칩니다 (자동 선택). */
+    fun applyMask(mask: ByteArray, op: SelOp) {
+        val tmp = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
+        val rb = tmp.rowBytes
+        val buf = ByteBuffer.allocate(rb * height)
+        if (rb == width) buf.put(mask, 0, width * height)
+        else for (y in 0 until height) {
+            buf.position(y * rb)
+            buf.put(mask, y * width, width)
+        }
+        buf.rewind()
+        tmp.copyPixelsFromBuffer(buf)
+        when (op) {
+            SelOp.REPLACE -> {
+                clear()
+                canvas.drawBitmap(tmp, 0f, 0f, null)
+            }
+            SelOp.ADD -> canvas.drawBitmap(tmp, 0f, 0f, null)
+            SelOp.SUBTRACT -> canvas.drawBitmap(tmp, 0f, 0f, Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) })
+            SelOp.INTERSECT -> canvas.drawBitmap(tmp, 0f, 0f, Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) })
+        }
+        tmp.recycle()
     }
 
     fun invert() {
@@ -165,6 +190,7 @@ class SelectionMask(val width: Int, val height: Int) {
             when (shape) {
                 SelShape.RECT -> p.addRect(rectOf(pts), Path.Direction.CW)
                 SelShape.ELLIPSE -> p.addOval(rectOf(pts), Path.Direction.CW)
+                SelShape.WAND -> Unit
                 SelShape.LASSO -> {
                     if (pts.size >= 2) {
                         p.moveTo(pts[0], pts[1])

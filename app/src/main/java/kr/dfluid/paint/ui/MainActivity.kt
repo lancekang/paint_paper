@@ -559,6 +559,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer.select(shape, pts, op)
     }
 
+    override fun onWandTap(x: Float, y: Float) {
+        val op = when {
+            shiftHeld -> SelOp.ADD
+            altHeld -> SelOp.SUBTRACT
+            else -> settings.selectMode
+        }
+        renderer.selectByColor(x.toInt(), y.toInt(), settings.wandOptions, op)
+    }
+
     override fun onFillTap(x: Float, y: Float) {
         renderer.fillAt(x.toInt(), y.toInt(), settings.fillOptions, settings.primaryColor, settings.fillOpacity)
         settings.pushRecent(settings.primaryColor)

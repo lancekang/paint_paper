@@ -26,6 +26,10 @@ class AppSettings(context: Context) {
     var fillExpand = 1
     var fillReferenceAll = true
     var fillOpacity = 1f
+    var wandTolerance = 10
+    var wandGap = 0
+    var wandExpand = 0
+    var wandReferenceAll = true
     var gradientRadial = false
     var gradientToTransparent = false
     var gradientOpacity = 1f
@@ -48,6 +52,10 @@ class AppSettings(context: Context) {
         fillExpand = prefs.getInt("fillExpand", 1)
         fillReferenceAll = prefs.getBoolean("fillReferenceAll", true)
         fillOpacity = prefs.getFloat("fillOpacity", 1f)
+        wandTolerance = prefs.getInt("wandTolerance", 10)
+        wandGap = prefs.getInt("wandGap", 0)
+        wandExpand = prefs.getInt("wandExpand", 0)
+        wandReferenceAll = prefs.getBoolean("wandReferenceAll", true)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
         gradientOpacity = prefs.getFloat("gradientOpacity", 1f)
@@ -57,6 +65,7 @@ class AppSettings(context: Context) {
     }
 
     val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillReferenceAll)
+    val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandReferenceAll)
     val gradientSpec: GradientSpec get() = GradientSpec(gradientRadial, gradientToTransparent)
     /** 새 캔버스 배경색. null = 투명 */
     val newCanvasBackground: Int? get() = if (canvasTransparent) null else canvasBackground
@@ -82,6 +91,10 @@ class AppSettings(context: Context) {
             .putInt("fillExpand", fillExpand)
             .putBoolean("fillReferenceAll", fillReferenceAll)
             .putFloat("fillOpacity", fillOpacity)
+            .putInt("wandTolerance", wandTolerance)
+            .putInt("wandGap", wandGap)
+            .putInt("wandExpand", wandExpand)
+            .putBoolean("wandReferenceAll", wandReferenceAll)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)
             .putFloat("gradientOpacity", gradientOpacity)

@@ -53,6 +53,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         /** tiny = 거의 움직이지 않은 탭 (선택 해제로 처리) */
         fun onSelectDone(shape: SelShape, pts: FloatArray, tiny: Boolean)
         fun onFillTap(x: Float, y: Float)
+        /** 자동 선택 도구로 누름 (캔버스 좌표) */
+        fun onWandTap(x: Float, y: Float)
         /** phase 0 = 진행, 1 = 확정, 2 = 취소 */
         fun onGradient(x0: Float, y0: Float, x1: Float, y1: Float, phase: Int)
         fun onMoveStart()
@@ -264,6 +266,10 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             // 변형 중에는 상자 밖을 눌러도 그리거나 선택하지 않습니다.
             h.transformActive && tool != Tool.MOVE -> Mode.IGNORE
             // 선택 도구에서 Alt는 "빼기"라서 스포이드로 바꾸지 않습니다.
+            tool == Tool.SELECT && h.selectShape == SelShape.WAND -> {
+                h.onWandTap(downCx, downCy)
+                Mode.IGNORE
+            }
             tool == Tool.SELECT -> Mode.SELECT
             h.holdMode == HoldMode.EYEDROPPER || tool == Tool.EYEDROPPER || stylusButton -> Mode.PICK
             tool == Tool.MOVE -> Mode.MOVE

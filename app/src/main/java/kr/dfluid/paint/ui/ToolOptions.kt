@@ -188,9 +188,25 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildSelect() {
         val s = host.settings
-        view.addView(toggleRow(listOf("사각형", "타원", "올가미"), s.selectShape.ordinal) { s.selectShape = SelShape.entries[it]; s.save() }, lp(6f))
+        view.addView(toggleRow(listOf("사각형", "타원", "올가미", "자동"), s.selectShape.ordinal) {
+            val wasWand = s.selectShape == SelShape.WAND
+            s.selectShape = SelShape.entries[it]
+            s.save()
+            // 자동 선택 옵션을 보이거나 숨김
+            if (wasWand != (s.selectShape == SelShape.WAND)) view.post { rebuild() }
+        }, lp(6f))
         view.addView(toggleRow(listOf("새로", "추가", "빼기", "교차"), s.selectMode.ordinal) { s.selectMode = SelOp.entries[it]; s.save() }, lp(4f))
-        view.addView(hint("Shift = 추가, Alt = 빼기. 짧게 누르면 선택 해제."), lp())
+        if (s.selectShape == SelShape.WAND) {
+            view.addView(toggleRow(listOf("모든 레이어 참조", "현재 레이어"), if (s.wandReferenceAll) 0 else 1) {
+                s.wandReferenceAll = it == 0; s.save()
+            }, lp(6f))
+            intSlider("허용 오차", 0, 100, { s.wandTolerance * 100 / 255 }, { s.wandTolerance = it * 255 / 100 }) { "$it" }
+            intSlider("틈 메우기", 0, 10, { s.wandGap }, { s.wandGap = it }) { if (it == 0) "끔" else "${it}px" }
+            intSlider("영역 확장", 0, 6, { s.wandExpand }, { s.wandExpand = it }) { "${it}px" }
+            view.addView(hint("누른 곳과 비슷한 색으로 이어진 영역을 선택합니다. 선화 안쪽을 누르면 칸 하나가 선택됩니다. Shift = 추가, Alt = 빼기."), lp())
+        } else {
+            view.addView(hint("Shift = 추가, Alt = 빼기. 짧게 누르면 선택 해제."), lp())
+        }
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         for ((label, f) in listOf<kotlin.Pair<String, () -> Unit>>(
             "모두" to { host.selectAll() }, "해제" to { host.deselect() }, "반전" to { host.invertSelection() }, "변형" to { host.startTransform() }
