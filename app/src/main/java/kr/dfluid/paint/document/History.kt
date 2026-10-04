@@ -48,20 +48,35 @@ class History(
 
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
+    val undoCount: Int get() = undoStack.size
+
+    /** 다음 [push]에 붙일 이름 (작업 내역 창용). 없으면 커맨드 종류로 짐작 */
+    var nextLabel: String? = null
+    /** 커맨드 → 이름 (커맨드는 equals를 쓰지 않으므로 객체 자체로 구분) */
+    private val labels = HashMap<HistoryCommand, String>()
+
+    /** 작업 내역: 실행취소할 수 있는 단계(오래된 것부터) + 다시실행할 수 있는 단계(다음 것부터) */
+    fun undoLabels(): List<String> = undoStack.map { labels[it] ?: describe(it) }
+    fun redoLabels(): List<String> = redoStack.reversed().map { labels[it] ?: describe(it) }
 
     /** 실행취소·다시실행 기록이 쓰는 CPU 메모리 (바이트) */
     val totalBytes: Long get() = undoStack.sumOf { it.bytes } + redoStack.sumOf { it.bytes }
 
     fun push(cmd: HistoryCommand) {
+        redoStack.forEach { labels.remove(it) }
         redoStack.clear()
         undoStack.addLast(cmd)
+        labels[cmd] = nextLabel ?: describe(cmd)
+        nextLabel = null
         trim()
     }
 
     private fun trim() {
         var total = undoStack.sumOf { it.bytes }
         while (undoStack.size > 1 && (undoStack.size > maxSteps || total > maxBytes)) {
-            total -= undoStack.removeFirst().bytes
+            val c = undoStack.removeFirst()
+            labels.remove(c)
+            total -= c.bytes
         }
     }
 
@@ -93,6 +108,16 @@ class History(
     fun clear() {
         undoStack.clear()
         redoStack.clear()
+        labels.clear()
+    }
+
+    private fun describe(c: HistoryCommand): String = when (c) {
+        is TilesCommand -> "그리기"
+        is StructureCommand -> "레이어"
+        is SelectionCommand -> "선택 영역"
+        is DocumentCommand -> "캔버스 편집"
+        is CompoundCommand -> c.parts.firstOrNull { it !is SelectionCommand }?.let { describe(it) } ?: "편집"
+        else -> "벡터 선"
     }
 }
 
@@ -137,7 +162,7 @@ class SelectionCommand(private val before: ByteArray?, private val after: ByteAr
 }
 
 /** 여러 커맨드를 한 단계로. 실행취소는 역순. */
-class CompoundCommand(private val parts: List<HistoryCommand>) : HistoryCommand {
+class CompoundCommand(val parts: List<HistoryCommand>) : HistoryCommand {
     override val bytes: Long get() = parts.sumOf { it.bytes }
     override fun undo(s: LayerStore) {
         for (i in parts.indices.reversed()) parts[i].undo(s)

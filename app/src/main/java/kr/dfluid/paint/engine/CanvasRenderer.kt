@@ -493,6 +493,36 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 변형/그라데이션/필터 중의 실행취소는 그 작업만 취소합니다. */
+    /** 작업 내역: (이름들, 지금 위치). 0번 = "처음 상태", 위치 = 실행취소할 수 있는 단계 수 */
+    fun historyList(done: (List<String>, Int) -> Unit) = post {
+        val names = listOf("처음 상태") + history.undoLabels() + history.redoLabels()
+        val pos = history.undoCount
+        main.post { done(names, pos) }
+    }
+
+    /** 작업 내역의 [target]번 상태로 (그 사이를 실행취소/다시실행으로 한꺼번에) */
+    fun jumpHistory(target: Int) = post {
+        if (op is Op.Transform || op is Op.Gradient || op is Op.Filter) cancelPreviewOps()
+        finishOp()
+        var moved = false
+        try {
+            while (history.undoCount > target && history.undo(this)) moved = true
+            while (history.undoCount < target && history.redo(this)) moved = true
+        } finally {
+            if (moved) afterHistory()
+        }
+    }
+
+    /** 다음 실행취소 단계에 이름을 붙여 [f]를 실행 (남은 이름이 다른 단계에 붙지 않게 끝나면 지움) */
+    private inline fun <T> labeled(label: String, f: () -> T): T {
+        history.nextLabel = label
+        try {
+            return f()
+        } finally {
+            history.nextLabel = null
+        }
+    }
+
     fun undo() = post {
         if (op is Op.Transform || op is Op.Gradient || op is Op.Filter) {
             cancelPreviewOps(); return@post
@@ -530,7 +560,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 main.post { listener.onRendererError("메모리가 부족해 채우지 못했습니다.") }
                 null
             } ?: return@execute
-            post { applyFill(docRef, targetId, res, color, opacity) }
+            post { labeled("채우기") { applyFill(docRef, targetId, res, color, opacity) } }
         }
     }
 
@@ -566,7 +596,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 main.post { listener.onRendererError("올가미 안에 선으로 닫힌 영역이 없습니다.") }
                 return@execute
             }
-            post { applyFill(docRef, targetId, res, color, opacity) }
+            post { labeled("채우기") { applyFill(docRef, targetId, res, color, opacity) } }
         }
     }
 
@@ -667,7 +697,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc
         if (d !== docRef) return
         if (op != null) {
-            main.postDelayed({ post { applyFill(docRef, targetId, res, color, opacity) } }, 60)
+            main.postDelayed({ post { labeled("채우기") { applyFill(docRef, targetId, res, color, opacity) } } }, 60)
             return
         }
         if (d.activeId != targetId) return
@@ -1917,7 +1947,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         finishOp()
         val d = doc ?: return@post
         val n = editableActive(allowVector = true) ?: return@post
-        clearLayerGl(d, n)
+        labeled("레이어 지우기") { clearLayerGl(d, n) }
     }
 
     private fun clearLayerGl(d: Document, n: Node) {
@@ -2541,12 +2571,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     extra = VectorCommand(n.id, old, now)
                     revert = { vectors[n.id] = old }
                 }
-                if (!commitCoverage(strokeBuf!!.tex, o.color, o.brush.opacity, rect, o.brush.isEraser, useSel = hasSelection, extra = extra)) revert?.invoke()
+                val done = labeled(o.brush.name) {
+                    commitCoverage(strokeBuf!!.tex, o.color, o.brush.opacity, rect, o.brush.isEraser, useSel = hasSelection, extra = extra)
+                }
+                if (!done) revert?.invoke()
             }
             is Op.VErase -> {
                 op = null
                 if (o.current !== o.before) {
-                    history.push(CompoundCommand(listOf(TilesCommand(o.layerId, o.saved), VectorCommand(o.layerId, o.before, o.current))))
+                    labeled("벡터 지우개") { history.push(CompoundCommand(listOf(TilesCommand(o.layerId, o.saved), VectorCommand(o.layerId, o.before, o.current)))) }
                     version++
                     thumbQueue.add(o.layerId)
                     notifyHistory()
@@ -2556,15 +2589,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 op = null
                 val rect = gradientRect(d)
                 val p = o.p
-                commitToActive(rect, eraser = false) {
-                    compositor.drawMergeGradient(o.kind, o.stops, o.repeat, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
+                labeled("그라데이션") {
+                    commitToActive(rect, eraser = false) {
+                        compositor.drawMergeGradient(o.kind, o.stops, o.repeat, p[0], p[1], p[2], p[3], o.opacity, selTexIfAny(), d.width, d.height)
+                    }
                 }
             }
-            is Op.Transform -> commitTransformGl(o, d)
-            is Op.Filter -> commitFilterGl(o, d)
+            is Op.Transform -> labeled(if (o.mesh != null) "메시 변형" else if (o.h != null) "원근 변형" else "변형") { commitTransformGl(o, d) }
+            is Op.Filter -> labeled(o.spec.kind.label) { commitFilterGl(o, d) }
             is Op.Smudge -> {
                 op = null
-                commitSmudge(o, d)
+                labeled(o.brush.name) { commitSmudge(o, d) }
             }
             null -> Unit
         }

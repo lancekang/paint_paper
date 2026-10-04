@@ -468,6 +468,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("편집")
         undoBtn = barBtn(R.drawable.ic_undo, "실행취소", Action.UNDO) { renderer.undo() }
         redoBtn = barBtn(R.drawable.ic_redo, "다시실행", Action.REDO) { renderer.redo() }
+        barBtn(R.drawable.ic_history, "작업 내역 (눌러서 그 단계로 돌아가기)") { showHistory() }
         barBtn(R.drawable.ic_canvas, "캔버스 (이미지 크기 · 캔버스 크기 · 회전 · 반전)") { chooseCanvasEdit() }
         barBtn(R.drawable.ic_adjust, "필터 · 색조 보정 (색조/채도/명도, 밝기/대비, 흐리기 등)") { chooseFilter() }
         group("선택")
@@ -1575,6 +1576,26 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onSelectionChanged(hasSelection: Boolean) {
         this.hasSelection = hasSelection
         updateSelBar()
+    }
+
+    /** 작업 내역 창: 단계 목록에서 고르면 그 상태로 실행취소/다시실행 */
+    private fun showHistory() {
+        renderer.historyList { names, pos ->
+            val items = names.mapIndexed { i, n ->
+                when {
+                    i == pos -> "▶ $n"
+                    i > pos -> "    $n (다시실행)"
+                    else -> "    $n"
+                }
+            }
+            val dlg = Ui.dialog(this)
+                .setTitle("작업 내역 (${names.size - 1}단계)")
+                .setItems(items.toTypedArray()) { _, i -> if (i != pos) renderer.jumpHistory(i) }
+                .setNegativeButton("닫기", null)
+                .create()
+            dlg.setOnShowListener { dlg.listView?.setSelection((pos - 3).coerceAtLeast(0)) }
+            dlg.show()
+        }
     }
 
     /** 저장해 둔 선택 영역 고르기 (새로 / 추가 / 빼기) */
