@@ -103,6 +103,30 @@ class UnitQuad {
 
 /** 블렌딩 상태 전환 헬퍼. 모든 텍스처는 프리멀티플라이드 알파입니다. */
 object GlState {
+    /**
+     * 지금 묶인 FBO (-1 = 모름). 같은 FBO를 다시 묶지 않습니다.
+     * 타일 기반 GPU(Adreno 등)는 FBO를 다시 묶을 때마다 렌더 패스를 새로 열어
+     * 캔버스 전체를 타일 메모리로 다시 읽을 수 있어서, 레이어마다 묶으면 매우 느려집니다.
+     * 모든 FBO 바인딩은 이 함수로만 하고, FBO를 지울 때는 forgetFbo를 부릅니다.
+     */
+    private var boundFbo = -1
+
+    fun bindFbo(fbo: Int) {
+        if (fbo != boundFbo) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+            boundFbo = fbo
+        }
+    }
+
+    fun forgetFbo(fbo: Int) {
+        if (boundFbo == fbo) boundFbo = -1
+    }
+
+    /** 새 GL 컨텍스트 (onSurfaceCreated) */
+    fun resetFbo() {
+        boundFbo = -1
+    }
+
     fun off() {
         GLES20.glDisable(GLES20.GL_BLEND)
     }

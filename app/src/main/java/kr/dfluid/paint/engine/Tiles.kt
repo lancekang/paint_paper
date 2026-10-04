@@ -38,7 +38,7 @@ class TilePool(private val keepFree: Int = 96) {
     fun acquire(): Tile {
         live++
         val t = free.removeLastOrNull() ?: create()
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, t.fbo)
+        GlState.bindFbo(t.fbo)
         GLES20.glViewport(0, 0, TILE, TILE)
         GlState.noScissor()
         GLES20.glClearColor(0f, 0f, 0f, 0f)
@@ -83,12 +83,13 @@ class TilePool(private val keepFree: Int = 96) {
         }
         GLES20.glGenFramebuffers(1, ids, 0)
         val fbo = ids[0]
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+        GlState.bindFbo(fbo)
         GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex, 0)
         return Tile(tex, fbo)
     }
 
     private fun delete(t: Tile) {
+        GlState.forgetFbo(t.fbo)
         GLES20.glDeleteFramebuffers(1, intArrayOf(t.fbo), 0)
         GLES20.glDeleteTextures(1, intArrayOf(t.tex), 0)
     }
@@ -117,13 +118,13 @@ class TileSurface(val width: Int, val height: Int, private val pool: TilePool) {
 
     /** 캔버스 좌표계로 그릴 수 있게 타일 FBO와 오프셋 뷰포트를 설정합니다. */
     fun bindCanvasSpace(key: Int, t: Tile) {
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, t.fbo)
+        GlState.bindFbo(t.fbo)
         GLES20.glViewport(-originX(key), -originY(key), width, height)
     }
 
     /** 타일 FBO를 타일 좌표계(0..256)로 바인딩. */
     fun bindLocal(t: Tile) {
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, t.fbo)
+        GlState.bindFbo(t.fbo)
         GLES20.glViewport(0, 0, TILE, TILE)
     }
 

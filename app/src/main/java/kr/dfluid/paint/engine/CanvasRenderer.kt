@@ -881,6 +881,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         val contextLost = glReady
+        GlState.resetFbo()
         brushEngine = BrushEngine()
         compositor = Compositor()
         val arr = IntArray(1)
@@ -954,6 +955,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // =====================================================================
 
     private var benchPhase = 0
+    /** 벤치마크 5단계: framebuffer fetch를 끄고 전체 다시 합성 (같은 조건에서 비교용) */
+    private var benchNoFetch = false
     private var benchLeft = 0
     private val benchTimes = PerfMonitor.Window(120)
     private val benchReport = StringBuilder()
@@ -974,8 +977,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     private fun startBenchPhase(phase: Int) {
+        if (phase == 1) segMs.fill(0.0)
         benchPhase = phase
-        benchLeft = if (phase == 1) 20 else 60
+        benchLeft = if (phase == 1 || phase == 5) 20 else 60
+        benchNoFetch = phase == 5
         benchTimes.clear()
         requestRender()
     }
@@ -983,7 +988,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private fun benchPrepare(d: Document): Long {
         GLES20.glFinish()
         when (benchPhase) {
-            1 -> { belowValid = false; markAllDirty() }
+            1, 5 -> { belowValid = false; markAllDirty() }
             2 -> markAllDirty()
             3 -> {
                 val s = 512
@@ -1001,7 +1006,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return
         }
         val label = when (benchPhase) {
-            1 -> "전체 다시 합성"
+            1 -> if (compositor.hasFetch) "전체 다시 합성 (fetch)" else "전체 다시 합성"
+            5 -> "전체 다시 합성 (fetch 끔)"
             2 -> "활성 레이어 속성 변경"
             3 -> "브러시 영역(512px) 합성"
             else -> "화면 표시만"
@@ -1009,9 +1015,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val avg = benchTimes.mean()
         benchReport.append(String.format("%s: 평균 %.1fms · 95%% %.1fms · 최소 %.1fms → 약 %.0f fps\n",
             label, avg, benchTimes.percentile(0.95f), benchTimes.min(), if (avg > 0f) 1000f / avg else 0f))
-        if (benchPhase < 4) startBenchPhase(benchPhase + 1)
+        if (benchPhase == 1) benchReport.append(String.format("  └ 아래 합성 %.1f · 캐시 저장 %.1f · 캐시 복사 %.1f · 위 합성 %.1f (ms, 평균)\n", segMs[0] / 20, segMs[1] / 20, segMs[2] / 20, segMs[3] / 20))
+        if (benchPhase == 4 && !compositor.hasFetch) benchPhase = 5
+        if (benchPhase < 5) startBenchPhase(benchPhase + 1)
         else {
             benchPhase = 0
+            benchNoFetch = false
             val report = benchReport.toString().trimEnd()
             main.post { listener.onBenchmarkDone(report) }
         }
@@ -1369,7 +1378,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         val fl = RenderTarget(bounds.w, bounds.h)
         // 떠 있는 픽셀 = 레이어 × 선택 마스크. 뷰포트를 밀어 캔버스 좌표계로 그립니다.
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fl.fbo)
+        GlState.bindFbo(fl.fbo)
         GLES20.glViewport(-bounds.x, -bounds.y, d.width, d.height)
         GlState.off()
         for ((key, t) in s.tiles) {
@@ -1602,13 +1611,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val startId = kids.getOrNull(start)?.id ?: -1
         val below = belowCache!!
 
+        segMark(-1)
         if (!belowValid || belowStartId != startId) {
             root.cur.clear()
             composeChildren(kids, 0, start, root, full, 0)
+            segMark(0)
             below.bind()
             GlState.off()
             GlState.noScissor()
             compositor.drawCopy(root.cur.tex, 1f)
+            segMark(1)
             belowValid = true
             belowStartId = startId
             region = full
@@ -1625,6 +1637,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         GlState.off()
         compositor.drawCopy(below.tex, 1f)
         GlState.noScissor()
+        segMark(2)
         composeChildren(kids, start, kids.size, root, region, 0)
         if (root.cur !== startBuf) {
             startBuf.bind()
@@ -1636,6 +1649,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         compResult = root.cur
         mipDirty = true
+        segMark(3)
+    }
+
+    // ---- 벤치마크 1단계 구간 시간 (어디가 느린지 보고서에 함께 표시) ----
+    private val segMs = DoubleArray(4)
+    private var segT = 0L
+    private fun segMark(i: Int) {
+        if (benchPhase != 1) return
+        GLES20.glFinish()
+        val now = System.nanoTime()
+        if (i >= 0) segMs[i] += (now - segT) / 1e6
+        segT = now
     }
 
     /** nodes[from until to]를 T에 합성. 클리핑 묶음은 기준 레이어와 함께 처리합니다. */
@@ -1719,6 +1744,30 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             if (preserve) GlState.atop() else GlState.over()
             drawSourceCopy(src, opacity, r)
             GlState.off()
+            GlState.noScissor()
+            return
+        }
+        if (compositor.hasFetch && !benchNoFetch) {
+            // framebuffer fetch: 대상 FBO에서 바로 읽고 써서 핑퐁·FBO 전환이 없습니다.
+            val d = doc!!
+            t.cur.bind()
+            GlState.off()
+            when (src) {
+                is Src.Tex -> {
+                    GlState.scissor(r)
+                    compositor.drawBlendFetch(src.t.tex, opacity, mode.shaderId, preserve)
+                }
+                is Src.Tiles -> {
+                    val b = src.s.tileBounds()?.intersect(r)
+                    if (b != null) {
+                        GlState.scissor(b)
+                        for ((key, tile) in src.s.tiles) {
+                            if (!src.s.tileRect(key).intersects(b)) continue
+                            compositor.drawBlendTileFetch(tile.tex, src.s.originX(key), src.s.originY(key), d.width, d.height, opacity, mode.shaderId, preserve)
+                        }
+                    }
+                }
+            }
             GlState.noScissor()
             return
         }
@@ -1852,7 +1901,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private fun drawScreen(d: Document) {
         val comp = compResult ?: return
         val v = view
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GlState.bindFbo(0)
         GLES20.glViewport(0, 0, screenW, screenH)
         GlState.noScissor()
         GLES20.glClearColor(0.19f, 0.195f, 0.205f, 1f)

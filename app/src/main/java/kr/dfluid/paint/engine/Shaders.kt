@@ -159,6 +159,52 @@ void main() {
 }
 """
 
+    /**
+     * BLEND_FS와 같은 식을 framebuffer fetch로: 대상 픽셀을 텍스처가 아니라 현재 FBO에서 바로 읽습니다.
+     * 핑퐁(다른 FBO로 복사 → 합성 → 되돌리기)이 없어져 타일 기반 GPU에서 렌더 패스 전환이 사라집니다.
+     * GL_EXT_shader_framebuffer_fetch가 있을 때만 씁니다. 블렌딩은 끈 채로 그립니다.
+     */
+    const val BLEND_FETCH_FS = """#version 300 es
+#extension GL_EXT_shader_framebuffer_fetch : require
+precision highp float;
+in vec2 v_uv;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform float u_opacity;
+uniform int u_mode;
+uniform int u_preserve;
+inout highp vec4 o;
+
+vec3 blendFn(vec3 s, vec3 d) {
+    if (u_mode == 1) return s * d;
+    if (u_mode == 2) return s + d - s * d;
+    if (u_mode == 3) return mix(2.0 * s * d, 1.0 - 2.0 * (1.0 - s) * (1.0 - d), step(0.5, d));
+    if (u_mode == 4) return min(s + d, vec3(1.0));
+    if (u_mode == 5) return min(s, d);
+    if (u_mode == 6) return max(s, d);
+    if (u_mode == 7) return abs(s - d);
+    return s;
+}
+
+void main() {
+    vec4 S = texture(u_src, v_uv) * u_opacity;
+    vec4 D = o;
+    vec3 s = S.a > 0.0 ? S.rgb / S.a : vec3(0.0);
+    vec3 d = D.a > 0.0 ? D.rgb / D.a : vec3(0.0);
+    vec3 mixed = blendFn(s, d) * S.a * D.a;
+    float a;
+    vec3 rgb;
+    if (u_preserve == 1) {
+        a = D.a;
+        rgb = D.rgb * (1.0 - S.a) + mixed;
+    } else {
+        a = S.a + D.a - S.a * D.a;
+        rgb = S.rgb * (1.0 - D.a) + D.rgb * (1.0 - S.a) + mixed;
+    }
+    o = vec4(min(rgb, vec3(a)), a);
+}
+"""
+
     /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
     const val DISPLAY_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;

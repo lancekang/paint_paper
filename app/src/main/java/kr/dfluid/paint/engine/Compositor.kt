@@ -14,6 +14,21 @@ class Compositor {
     private val merge = GlProgram(Shaders.QUAD_VS, Shaders.MERGE_FS)
     private val blend = GlProgram(Shaders.QUAD_VS, Shaders.BLEND_FS)
     private val blendTile = GlProgram(Shaders.TILE_VS, Shaders.BLEND_FS)
+
+    /** framebuffer fetch 합성 프로그램 (지원하지 않거나 컴파일에 실패하면 null → 핑퐁 사용) */
+    private val fetchPrograms: kotlin.Pair<GlProgram, GlProgram>? = run {
+        val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
+        if (!ext.contains("GL_EXT_shader_framebuffer_fetch")) return@run null
+        try {
+            GlProgram(Shaders.QUAD_VS, Shaders.BLEND_FETCH_FS) to GlProgram(Shaders.TILE_VS, Shaders.BLEND_FETCH_FS)
+        } catch (e: RuntimeException) {
+            android.util.Log.w("DFPaint", "framebuffer fetch 셰이더 실패, 핑퐁으로 합성합니다", e)
+            null
+        }
+    }
+
+    /** 블렌드 모드를 대상 FBO에서 바로 합성할 수 있음 (핑퐁 불필요) */
+    val hasFetch: Boolean get() = fetchPrograms != null
     private val display = GlProgram(Shaders.DISPLAY_VS, Shaders.DISPLAY_FS)
     private val cursor = GlProgram(Shaders.QUAD_VS, Shaders.CURSOR_FS)
     private val viewMatrix = FloatArray(9)
@@ -121,6 +136,31 @@ class Compositor {
         GLES20.glUniform2f(blendTile.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
         quad.draw()
         unbind1()
+    }
+
+    /** [hasFetch]일 때만. 현재 FBO = 대상. 블렌딩 끄고 호출. 소스가 캔버스 크기 텍스처. */
+    fun drawBlendFetch(srcTex: Int, opacity: Float, mode: Int, preserve: Boolean) {
+        val p = fetchPrograms!!.first
+        setupFetch(p, srcTex, opacity, mode, preserve)
+        quad.draw()
+    }
+
+    /** [hasFetch]일 때만. 소스가 타일. */
+    fun drawBlendTileFetch(tileTex: Int, ox: Int, oy: Int, canvasW: Int, canvasH: Int, opacity: Float, mode: Int, preserve: Boolean) {
+        val p = fetchPrograms!!.second
+        setupFetch(p, tileTex, opacity, mode, preserve)
+        GLES20.glUniform2f(p.u("u_origin"), ox.toFloat(), oy.toFloat())
+        GLES20.glUniform2f(p.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        quad.draw()
+    }
+
+    private fun setupFetch(p: GlProgram, srcTex: Int, opacity: Float, mode: Int, preserve: Boolean) {
+        p.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(p.u("u_src"), 0)
+        GLES20.glUniform1f(p.u("u_opacity"), opacity)
+        GLES20.glUniform1i(p.u("u_mode"), mode)
+        GLES20.glUniform1i(p.u("u_preserve"), if (preserve) 1 else 0)
     }
 
     private fun setupBlend(p: GlProgram, srcTex: Int, dstTex: Int, opacity: Float, mode: Int, preserve: Boolean) {

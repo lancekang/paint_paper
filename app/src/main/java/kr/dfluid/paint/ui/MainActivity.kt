@@ -321,6 +321,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         panel.addView(ScrollView(this).apply {
             addView(toolOptions.view)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.9f))
+        panel.addView(toolOptions.recentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = Ui.dp(this@MainActivity, 6f)
+        })
         panel.addView(Ui.divider(this))
         panel.addView(layerPanel.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f))
         rightPanel = panel

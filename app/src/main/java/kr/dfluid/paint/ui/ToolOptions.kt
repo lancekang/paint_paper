@@ -40,6 +40,15 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
     private var smoothingRow: Ui.SliderRow? = null
     private val recentRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
 
+    /** 최근 색: 옵션이 길어져도 가려지지 않게 스크롤 밖(패널에 고정)에 둡니다. */
+    val recentView: LinearLayout = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(Ui.text(ctx, "최근 색", 11f, Ui.SUBTEXT))
+        addView(recentRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = Ui.dp(ctx, 2f)
+        })
+    }
+
     fun show(t: Tool) {
         tool = t
         rebuild()
@@ -65,8 +74,6 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
             tool == Tool.EYEDROPPER -> view.addView(hint("누른 곳의 색을 주색으로 가져옵니다. Alt를 누르고 있으면 다른 도구에서도 스포이드가 됩니다."), lp())
             tool == Tool.HAND -> view.addView(hint("드래그해 화면을 옮깁니다. Space를 누르고 있어도 됩니다."), lp())
         }
-        view.addView(Ui.text(ctx, "최근 색", 11f, Ui.SUBTEXT), lp(10f))
-        view.addView(recentRow, lp(2f))
         refreshRecent()
     }
 

@@ -36,7 +36,7 @@ class RenderTarget(val width: Int, val height: Int, val mask: Boolean = false) {
 
         GLES20.glGenFramebuffers(1, ids, 0)
         fbo = ids[0]
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+        GlState.bindFbo(fbo)
         GLES20.glFramebufferTexture2D(
             GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex, 0
         )
@@ -49,7 +49,7 @@ class RenderTarget(val width: Int, val height: Int, val mask: Boolean = false) {
     }
 
     fun bind() {
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+        GlState.bindFbo(fbo)
         GLES20.glViewport(0, 0, width, height)
     }
 
@@ -108,6 +108,7 @@ class RenderTarget(val width: Int, val height: Int, val mask: Boolean = false) {
     }
 
     fun release() {
+        GlState.forgetFbo(fbo)
         GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
         GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
     }
