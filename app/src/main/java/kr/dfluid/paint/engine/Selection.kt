@@ -225,6 +225,38 @@ object SelectionOps {
         SelModify.FEATHER -> feather(mask, w, h, px)
     }
 
+    /**
+     * 선택 경계를 따라 굵기 [px]의 띠 (0..255). [where] 0 = 바깥, 1 = 가운데, 2 = 안쪽.
+     * 결과 경계를 [bounds]에 (l, t, r, b, 없으면 r < l)
+     */
+    fun border(mask: ByteArray, w: Int, h: Int, px: Int, where: Int, bounds: IntArray): ByteArray {
+        val p = px.coerceAtLeast(1)
+        val outer = when (where) {
+            0 -> grow(mask, w, h, p)
+            1 -> if (p / 2 > 0) grow(mask, w, h, p / 2) else mask
+            else -> mask
+        }
+        val inner = when (where) {
+            0 -> mask
+            1 -> shrink(mask, w, h, p - p / 2)
+            else -> shrink(mask, w, h, p)
+        }
+        val out = ByteArray(w * h)
+        var l = w; var t = h; var r = -1; var b = -1
+        for (y in 0 until h) for (x in 0 until w) {
+            val i = y * w + x
+            val v = minOf(outer[i].toInt() and 0xFF, 255 - (inner[i].toInt() and 0xFF))
+            if (v <= 0) continue
+            out[i] = v.toByte()
+            if (x < l) l = x
+            if (x > r) r = x
+            if (y < t) t = y
+            if (y > b) b = y
+        }
+        bounds[0] = l; bounds[1] = t; bounds[2] = r; bounds[3] = b
+        return out
+    }
+
     /** 선택 안(>= 128)에서 거리 (px × 3). inside = true면 반대로 선택 밖에서의 거리. */
     private fun distance(mask: ByteArray, w: Int, h: Int, fromOutside: Boolean): IntArray {
         val inf = Int.MAX_VALUE / 2

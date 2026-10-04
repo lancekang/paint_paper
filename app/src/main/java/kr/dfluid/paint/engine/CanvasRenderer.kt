@@ -1579,6 +1579,35 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
+    /** 선택 범위 테두리 그리기: 경계를 따라 [width]px 띠를 [color]로 ([where] 0 바깥 · 1 가운데 · 2 안쪽). 실행취소 한 단계 */
+    fun strokeSelection(width: Int, where: Int, color: Int) = post {
+        val d = doc ?: return@post
+        if (!hasSelection) {
+            reportError("선택 영역이 없습니다.")
+            return@post
+        }
+        val n = editableActive() ?: return@post
+        finishOp()
+        val m = selection ?: return@post
+        val buf = m.toBuffer()
+        val arr = ByteArray(buf.remaining()).also { buf.get(it) }
+        val w = d.width
+        val h = d.height
+        val targetId = n.id
+        worker.execute {
+            val bounds = IntArray(4)
+            val ring = try {
+                SelectionOps.border(arr, w, h, width, where, bounds)
+            } catch (e: OutOfMemoryError) {
+                main.post { listener.onRendererError("메모리가 부족해 테두리를 그리지 못했습니다.") }
+                return@execute
+            }
+            if (bounds[2] < bounds[0]) return@execute
+            val res = FloodFill.Result(ring, IRect(bounds[0], bounds[1], bounds[2] - bounds[0] + 1, bounds[3] - bounds[1] + 1))
+            post { labeled("테두리 그리기") { applyFill(d, targetId, res, color, 1f) } }
+        }
+    }
+
     /** 활성 레이어(마스크 편집 중이면 레이어 픽셀)의 불투명한 부분으로 선택 영역을 만듭니다. */
     fun selectFromLayer(selOp: SelOp) = post {
         val d = doc ?: return@post

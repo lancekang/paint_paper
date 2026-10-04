@@ -826,6 +826,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         sbBtn(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM) { onShortcut(Action.TRANSFORM) }
         sbBtn(R.drawable.ic_quick_mask, "퀵 마스크", Action.SELECT_QUICK_MASK) { onShortcut(Action.SELECT_QUICK_MASK) }
         sbText("컷", "컷 나누기: 선택 범위로 컷 폴더 만들기 (컷 영역 + 클리핑된 그림 + 테두리)", null) { chooseFrame() }
+        sbText("테두리", "선택 범위 테두리 그리기 (주색, 굵기·위치)", null) { chooseSelectionBorder() }
         sbText("저장", "선택 영역 저장 (나중에 불러오기)", null) {
             renderer.storeSelection { names -> showHud("${names.last()}(으)로 저장했습니다") }
         }
@@ -1690,6 +1691,44 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             dlg.setOnShowListener { dlg.listView?.setSelection((pos - 3).coerceAtLeast(0)) }
             dlg.show()
         }
+    }
+
+    private var borderWidthPx = 4
+    private var borderWhere = 0
+
+    /** 선택 범위 테두리 그리기: 굵기와 위치(바깥/가운데/안쪽)를 고르고 주색으로 */
+    private fun chooseSelectionBorder() {
+        val ctx = this
+        val pad = Ui.dp(ctx, 20f)
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
+            minimumWidth = Ui.dp(ctx, 340f)
+        }
+        val row = Ui.SliderRow(ctx, "굵기", 99)
+        row.set(borderWidthPx - 1, "${borderWidthPx}px")
+        row.onChange = { p -> borderWidthPx = p + 1; row.set(p, "${borderWidthPx}px") }
+        body.addView(row.view)
+        val group = android.widget.RadioGroup(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("바깥", "가운데", "안쪽").forEachIndexed { i, n ->
+            group.addView(android.widget.RadioButton(ctx).apply {
+                id = 7200 + i
+                text = n
+                setTextColor(Ui.TEXT)
+                isChecked = i == borderWhere
+            })
+        }
+        group.setOnCheckedChangeListener { _, c -> borderWhere = c - 7200 }
+        body.addView(group)
+        Ui.dialog(ctx)
+            .setTitle("선택 범위 테두리 그리기")
+            .setView(body)
+            .setPositiveButton("그리기") { _, _ ->
+                renderer.strokeSelection(borderWidthPx, borderWhere, settings.primaryColor)
+                settings.pushRecent(settings.primaryColor)
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     /** 저장해 둔 선택 영역 고르기 (새로 / 추가 / 빼기) */
