@@ -46,6 +46,8 @@ class AppSettings(context: Context) {
     var animFps = 12
     /** 서브 뷰 (참고 이미지 창) */
     var subOpen = false
+    /** 선택 범위 런처를 보일지 */
+    var selLauncher = true
     var subUri: String? = null
     var subFx = 0.72f
     var subFy = 0.55f
@@ -121,6 +123,7 @@ class AppSettings(context: Context) {
         textVertical = prefs.getBoolean("textVertical", false)
         animFps = prefs.getInt("animFps", 12)
         subOpen = prefs.getBoolean("subOpen", false)
+        selLauncher = prefs.getBoolean("selLauncher", true)
         subUri = prefs.getString("subUri", null)
         subFx = prefs.getFloat("subFx", 0.72f)
         subFy = prefs.getFloat("subFy", 0.55f)
@@ -194,6 +197,7 @@ class AppSettings(context: Context) {
             .putBoolean("textVertical", textVertical)
             .putInt("animFps", animFps)
             .putBoolean("subOpen", subOpen)
+            .putBoolean("selLauncher", selLauncher)
             .putString("subUri", subUri)
             .putFloat("subFx", subFx)
             .putFloat("subFy", subFy)

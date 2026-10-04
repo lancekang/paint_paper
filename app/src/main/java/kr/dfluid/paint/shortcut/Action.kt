@@ -145,6 +145,9 @@ enum class Action(val label: String, val category: String, val kind: ActionKind,
     SELECT_NONE("선택 해제", "선택", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_D, ctrl = true))),
     SELECT_INVERT("선택 반전", "선택", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_I, ctrl = true, shift = true))),
     SELECT_QUICK_MASK("퀵 마스크", "선택", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_Q))),
+    EDIT_COPY("복사", "편집", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_C, ctrl = true))),
+    EDIT_CUT("잘라내기", "편집", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_X, ctrl = true))),
+    EDIT_PASTE("붙여넣기 (새 레이어)", "편집", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_V, ctrl = true))),
 
     // 레이어
     LAYER_NEW("새 레이어", "레이어", ActionKind.PRESS, listOf(k(KeyEvent.KEYCODE_N, ctrl = true, shift = true))),

@@ -118,6 +118,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var transformBar: View
     // ---- 애니메이션 타임라인 ----
     private lateinit var animBar: LinearLayout
+    /** 선택 범위 런처: 선택 영역이 있을 때 아래에 뜨는 빠른 동작 */
+    private lateinit var selBar: LinearLayout
     // ---- 서브 뷰 ----
     private lateinit var subPanel: LinearLayout
     private lateinit var subImage: RefImageView
@@ -664,6 +666,43 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = Ui.dp(ctx, 16f)
         })
+
+        // ---- 선택 범위 런처 ----
+        val sb = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val p = Ui.dp(ctx, 6f)
+            setPadding(p, p / 2, p, p / 2)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            visibility = View.GONE
+        }
+        fun sbBtn(icon: Int, tip: String, action: Action?, f: () -> Unit) {
+            val b = tips.bind(Ui.iconButton(ctx, icon, tip, 38f, ghost = true, onClick = f), tip, action)
+            sb.addView(b, Ui.square(ctx, 38f).apply { rightMargin = Ui.dp(ctx, 2f) })
+        }
+        fun sbText(label: String, tip: String, action: Action?, f: () -> Unit) {
+            val b = tips.bind(Ui.button(ctx, label) { f() }, tip, action)
+            sb.addView(b, Ui.wrap().apply { rightMargin = Ui.dp(ctx, 3f) })
+        }
+        sbBtn(R.drawable.ic_deselect, "선택 해제", Action.SELECT_NONE) { onShortcut(Action.SELECT_NONE) }
+        sbText("반전", "선택 반전", Action.SELECT_INVERT) { onShortcut(Action.SELECT_INVERT) }
+        sbText("확장", "선택 영역 확장 (선택 도구의 범위만큼)", null) { modifySelection(kr.dfluid.paint.engine.SelModify.GROW, settings.selModifyPx) }
+        sbText("축소", "선택 영역 축소", null) { modifySelection(kr.dfluid.paint.engine.SelModify.SHRINK, settings.selModifyPx) }
+        sb.addView(Ui.shortDivider(ctx, 1f), LinearLayout.LayoutParams(Ui.dp(ctx, 1f), Ui.dp(ctx, 26f)).apply { rightMargin = Ui.dp(ctx, 4f); leftMargin = Ui.dp(ctx, 2f) })
+        sbText("복사", "복사", Action.EDIT_COPY) { onShortcut(Action.EDIT_COPY) }
+        sbText("잘라내기", "잘라내기", Action.EDIT_CUT) { onShortcut(Action.EDIT_CUT) }
+        sbText("붙여넣기", "붙여넣기 (새 레이어)", Action.EDIT_PASTE) { onShortcut(Action.EDIT_PASTE) }
+        sb.addView(Ui.shortDivider(ctx, 1f), LinearLayout.LayoutParams(Ui.dp(ctx, 1f), Ui.dp(ctx, 26f)).apply { rightMargin = Ui.dp(ctx, 4f); leftMargin = Ui.dp(ctx, 2f) })
+        sbBtn(R.drawable.ic_layer_clear, "지우기", Action.LAYER_CLEAR) { onShortcut(Action.LAYER_CLEAR) }
+        sbBtn(R.drawable.ic_tool_fill, "주색으로 채우기", Action.FILL_SELECTION) { onShortcut(Action.FILL_SELECTION) }
+        sbBtn(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM) { onShortcut(Action.TRANSFORM) }
+        sbBtn(R.drawable.ic_quick_mask, "퀵 마스크", Action.SELECT_QUICK_MASK) { onShortcut(Action.SELECT_QUICK_MASK) }
+        selBar = sb
+        root.addView(selBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+            bottomMargin = Ui.dp(ctx, 16f)
+            leftMargin = Ui.dp(ctx, 90f)
+        })
+        updateSelBar()
 
         // ---- 서브 뷰 (참고 이미지) ----
         val subGrip = FloatingPanels.Grip(ctx, horizontal = true)
@@ -1289,12 +1328,24 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onSelectionChanged(hasSelection: Boolean) {
         this.hasSelection = hasSelection
+        updateSelBar()
+    }
+
+    private fun updateSelBar() {
+        if (!::selBar.isInitialized) return
+        selBar.visibility = if (hasSelection && !transforming && settings.selLauncher) View.VISIBLE else View.GONE
+        // 애니메이션 타임라인이 보이면 그 위로
+        (selBar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            val want = Ui.dp(this, if (::animBar.isInitialized && animBar.visibility == View.VISIBLE) 76f else 16f)
+            if (lp.bottomMargin != want) { lp.bottomMargin = want; selBar.layoutParams = lp }
+        }
     }
 
     override fun onThumbnail(id: Int, bitmap: Bitmap) = layerPanel.setThumbnail(id, bitmap)
 
     override fun onTransformStarted(width: Int, height: Int, matrix: FloatArray) {
         transforming = true
+        updateSelBar()
         overlay.startTransform(width, height, matrix)
         if (moveSession && (pendingMoveX != 0f || pendingMoveY != 0f)) overlay.translateBy(pendingMoveX, pendingMoveY)
         pendingMoveX = 0f; pendingMoveY = 0f
@@ -1309,6 +1360,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onTransformEnded() {
         transforming = false
+        updateSelBar()
         moveSession = false
         commitWhenStarted = false
         overlay.endTransform()
@@ -1347,6 +1399,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Ui.setOn(animBtn, exists && timelineOpen)
         animBar.visibility = if (exists && timelineOpen && !transforming) View.VISIBLE else View.GONE
         frameLabel.text = "${frame + 1} / $count"
+        updateSelBar()
         // 프레임 칸: 번호 버튼 (누르면 그 프레임으로)
         if (frameStrip.childCount != count) {
             frameStrip.removeAllViews()
@@ -1649,6 +1702,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.SELECT_NONE -> renderer.deselect()
             Action.SELECT_INVERT -> renderer.invertSelection()
             Action.SELECT_QUICK_MASK -> toggleQuickMask()
+            Action.EDIT_COPY -> renderer.copySelection(cut = false)
+            Action.EDIT_CUT -> renderer.copySelection(cut = true)
+            Action.EDIT_PASTE -> renderer.paste()
             Action.LAYER_NEW -> renderer.addLayer()
             Action.LAYER_FOLDER -> renderer.addFolder()
             Action.LAYER_GROUP -> renderer.groupActive()

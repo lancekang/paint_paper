@@ -603,6 +603,96 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun cancelFilter() = post { (op as? Op.Filter)?.let { endFilter(it) } }
 
     // =====================================================================
+    // UI 스레드 API — 복사 · 붙여넣기
+    // =====================================================================
+
+    /** 복사한 픽셀: 캔버스 (x, y)에 있던 w×h 프리멀티플라이드 RGBA (위→아래 행) */
+    private class Clip(val x: Int, val y: Int, val w: Int, val h: Int, val pixels: ByteBuffer)
+    private var clip: Clip? = null
+    @Volatile var hasClip = false
+        private set
+
+    /** 활성 레이어의 선택 영역(없으면 레이어 전체)을 복사. [cut]이면 그 자리를 지움. */
+    fun copySelection(cut: Boolean) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val n = editableActive(allowText = !cut, allowVector = !cut) ?: return@post
+        val s = surfaces[editId(n)] ?: return@post
+        val area = (if (hasSelection) selBounds else s.tileBounds()?.let { contentBounds(s, it) }) ?: run {
+            reportError("복사할 픽셀이 없습니다.")
+            return@post
+        }
+        val pv = preview!!
+        pv.clear(area)
+        pv.bind()
+        GlState.scissor(area)
+        GlState.off()
+        for ((key, t) in s.tiles) {
+            if (!s.tileRect(key).intersects(area)) continue
+            compositor.drawTile(t.tex, s.originX(key), s.originY(key), d.width, d.height, 1f, selTexIfAny(), if (hasSelection) 1 else 0)
+        }
+        GlState.noScissor()
+        val px = pv.read(area.x, area.y, area.w, area.h)
+        markAllDirty() // preview 버퍼를 빌려 썼음
+        clip = Clip(area.x, area.y, area.w, area.h, px)
+        hasClip = true
+        if (cut) clearLayerGl(d, n)
+        main.post { listener.onRendererError(if (cut) "잘라냈습니다." else "복사했습니다.") }
+    }
+
+    /** 복사한 픽셀을 활성 레이어 위 새 레이어로 (복사했던 자리에). 실행취소 한 단계. */
+    fun paste() = post {
+        finishOp()
+        val d = doc ?: return@post
+        val c = clip ?: run {
+            reportError("붙여넣을 것이 없습니다. 먼저 복사하세요.")
+            return@post
+        }
+        // 캔버스 크기가 바뀌었으면 넘치는 부분은 잘림
+        val tiles = HashMap<Int, ByteBuffer>()
+        val cols = TileMath.cols(d.width)
+        val r = IRect(c.x, c.y, c.w, c.h).intersect(IRect(0, 0, d.width, d.height)) ?: return@post
+        val tx0 = r.x / TILE; val ty0 = r.y / TILE
+        val tx1 = (r.right - 1) / TILE; val ty1 = (r.bottom - 1) / TILE
+        val row = ByteArray(TILE * 4)
+        for (ty in ty0..ty1) for (tx in tx0..tx1) {
+            val buf = GlUtil.byteBuffer(TILE_BYTES)
+            var any = false
+            for (yy in 0 until TILE) {
+                val cy = ty * TILE + yy
+                if (cy < r.y || cy >= r.bottom) continue
+                val x0 = maxOf(r.x, tx * TILE)
+                val x1 = minOf(r.right, tx * TILE + TILE)
+                if (x1 <= x0) continue
+                val len = (x1 - x0) * 4
+                val src = ((cy - c.y) * c.w + (x0 - c.x)) * 4
+                c.pixels.position(src)
+                c.pixels.get(row, 0, len)
+                buf.position((yy * TILE + (x0 - tx * TILE)) * 4)
+                buf.put(row, 0, len)
+                any = true
+            }
+            c.pixels.rewind()
+            buf.rewind()
+            if (any && !TileMath.isEmpty(buf)) tiles[ty * cols + tx] = buf
+        }
+        if (tiles.isEmpty()) return@post
+        structural { doc ->
+            val a = doc.active
+            val parent = a?.parent ?: doc.root
+            val idx = if (a != null) a.index + 1 else parent.children.size
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps("붙여넣기"))
+            insert(parent, idx, n)
+            n.id
+        }
+        val s = surfaces[d.activeId] ?: return@post
+        if (s.tileCount == 0) tiles.forEach { (k, b) -> s.write(k, b) }
+        thumbQueue.add(d.activeId)
+        belowValid = false
+        markAllDirty()
+    }
+
+    // =====================================================================
     // UI 스레드 API — 애니메이션
     // =====================================================================
 
@@ -1346,18 +1436,22 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         finishOp()
         val d = doc ?: return@post
         val n = editableActive(allowVector = true) ?: return@post
+        clearLayerGl(d, n)
+    }
+
+    private fun clearLayerGl(d: Document, n: Node) {
         val onVector = n.props.vector && !isMaskEdit(n)
         if (onVector && hasSelection) {
             reportError("벡터 레이어는 선택 영역 안만 지울 수 없습니다. 지우개로 선을 지우거나 선택을 해제하세요.")
-            return@post
+            return
         }
         if (hasSelection || isMaskEdit(n)) {
             // 마스크에서 "지우기" = 가리기 (선택이 없으면 전체)
-            val (tex, rect) = selectionCoverage(d) ?: return@post
+            val (tex, rect) = selectionCoverage(d) ?: return
             commitCoverage(tex, floatArrayOf(1f, 1f, 1f, 1f), 1f, rect, eraser = true, useSel = false)
         } else {
             val s = surfaces[n.id]!!
-            if (s.tileCount == 0) return@post
+            if (s.tileCount == 0) return
             val saved = HashMap<Int, ByteBuffer?>()
             for (k in s.tiles.keys.toList()) saved[k] = s.read(k)
             s.clear()
