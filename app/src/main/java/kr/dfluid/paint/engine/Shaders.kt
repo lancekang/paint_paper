@@ -1,0 +1,310 @@
+package kr.dfluid.paint.engine
+
+/**
+ * GLSL ES 3.00 셰이더 모음.
+ *
+ * 좌표 규약: 캔버스 좌표 (0,0) = 왼쪽 위, 단위 px.
+ * 캔버스 크기 텍스처에 그릴 때 NDC y = -1 이 텍스처 0행 = 캔버스 맨 윗줄이 되도록 맞춥니다.
+ * 타일에 그릴 때는 뷰포트를 타일 원점만큼 음수로 밀어서 같은 셰이더를 씁니다.
+ *
+ * 모든 정점 셰이더는 v_uv(소스 텍스처 좌표)와 v_cuv(캔버스 정규화 좌표)를 내보냅니다.
+ */
+object Shaders {
+
+    /** 단위 사각형 → 캔버스 전체. */
+    const val QUAD_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    v_uv = a_pos;
+    v_cuv = a_pos;
+    gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+    /** 타일 한 장을 캔버스 위 제자리에. */
+    const val TILE_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+uniform vec2 u_origin;
+uniform vec2 u_canvas;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    vec2 p = u_origin + a_pos * 256.0;
+    v_uv = a_pos;
+    v_cuv = p / u_canvas;
+    gl_Position = vec4(v_cuv * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+    /** 떠 있는 픽셀(자유 변형)을 아핀 행렬로 캔버스에. u_m = 로컬 px → 캔버스 px. */
+    const val AFFINE_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+uniform mat3 u_m;
+uniform vec2 u_size;
+uniform vec2 u_canvas;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    vec3 p = u_m * vec3(a_pos * u_size, 1.0);
+    v_uv = a_pos;
+    v_cuv = p.xy / u_canvas;
+    gl_Position = vec4(v_cuv * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+    /**
+     * 텍스처 복사 (+불투명도, +선택 마스크).
+     * u_maskMode: 0 없음, 1 마스크 안만, 2 마스크 밖만
+     */
+    const val COPY_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec2 v_cuv;
+uniform sampler2D u_tex;
+uniform sampler2D u_mask;
+uniform float u_opacity;
+uniform int u_maskMode;
+out vec4 o;
+void main() {
+    vec4 c = texture(u_tex, v_uv) * u_opacity;
+    if (u_maskMode == 1) c *= texture(u_mask, v_cuv).r;
+    else if (u_maskMode == 2) c *= 1.0 - texture(u_mask, v_cuv).r;
+    o = c;
+}
+"""
+
+    /**
+     * 레이어에 칠하기. 블렌딩 상태로 일반/지우개/투명 잠금(atop)을 고릅니다.
+     * u_kind: 0 커버리지 텍스처 × 색 (붓, 채우기), 1 선형 그라데이션, 2 원형 그라데이션
+     * u_c0, u_c1: 프리멀티플라이드 색
+     */
+    const val MERGE_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec2 v_cuv;
+uniform int u_kind;
+uniform sampler2D u_stroke;
+uniform sampler2D u_sel;
+uniform int u_useSel;
+uniform vec4 u_c0;
+uniform vec4 u_c1;
+uniform vec2 u_p0;
+uniform vec2 u_p1;
+uniform vec2 u_canvas;
+uniform float u_opacity;
+out vec4 o;
+void main() {
+    vec4 c;
+    if (u_kind == 0) {
+        c = u_c0 * texture(u_stroke, v_cuv).r;
+    } else {
+        vec2 p = v_cuv * u_canvas;
+        vec2 d = u_p1 - u_p0;
+        float t;
+        if (u_kind == 1) t = dot(p - u_p0, d) / max(dot(d, d), 1e-6);
+        else t = length(p - u_p0) / max(length(d), 1e-6);
+        c = mix(u_c0, u_c1, clamp(t, 0.0, 1.0));
+    }
+    c *= u_opacity;
+    if (u_useSel == 1) c *= texture(u_sel, v_cuv).r;
+    o = c;
+}
+"""
+
+    /**
+     * 블렌드 모드 합성 (핑퐁). 프리멀티플라이드 separable blend:
+     * rgb = S(1-Da) + D(1-Sa) + B(s,d)·Sa·Da,  a = Sa + Da - Sa·Da
+     * u_preserve = 1 (클리핑): S(1-Da) 항을 빼고 a = Da  (source-atop 일반화)
+     */
+    const val BLEND_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform sampler2D u_dst;
+uniform float u_opacity;
+uniform int u_mode;
+uniform int u_preserve;
+out vec4 o;
+
+vec3 blendFn(vec3 s, vec3 d) {
+    if (u_mode == 1) return s * d;
+    if (u_mode == 2) return s + d - s * d;
+    if (u_mode == 3) return mix(2.0 * s * d, 1.0 - 2.0 * (1.0 - s) * (1.0 - d), step(0.5, d));
+    if (u_mode == 4) return min(s + d, vec3(1.0));
+    if (u_mode == 5) return min(s, d);
+    if (u_mode == 6) return max(s, d);
+    if (u_mode == 7) return abs(s - d);
+    return s;
+}
+
+void main() {
+    vec4 S = texture(u_src, v_uv) * u_opacity;
+    vec4 D = texture(u_dst, v_cuv);
+    vec3 s = S.a > 0.0 ? S.rgb / S.a : vec3(0.0);
+    vec3 d = D.a > 0.0 ? D.rgb / D.a : vec3(0.0);
+    vec3 mixed = blendFn(s, d) * S.a * D.a;
+    float a;
+    vec3 rgb;
+    if (u_preserve == 1) {
+        a = D.a;
+        rgb = D.rgb * (1.0 - S.a) + mixed;
+    } else {
+        a = S.a + D.a - S.a * D.a;
+        rgb = S.rgb * (1.0 - D.a) + D.rgb * (1.0 - S.a) + mixed;
+    }
+    o = vec4(min(rgb, vec3(a)), a);
+}
+"""
+
+    /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
+    const val DISPLAY_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+uniform mat3 u_view;
+uniform vec2 u_canvas;
+uniform vec2 u_screen;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    v_uv = a_pos;
+    v_cuv = a_pos;
+    vec3 s = u_view * vec3(a_pos * u_canvas, 1.0);
+    gl_Position = vec4(s.x / u_screen.x * 2.0 - 1.0, 1.0 - s.y / u_screen.y * 2.0, 0.0, 1.0);
+}
+"""
+
+    /** 투명 영역 = 체커보드, 선택 영역 경계 = 움직이는 점선(개미 행렬). */
+    const val DISPLAY_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec2 v_cuv;
+uniform sampler2D u_tex;
+uniform sampler2D u_sel;
+uniform int u_hasSel;
+uniform float u_time;
+out vec4 o;
+
+bool inside(vec2 uv) {
+    return texture(u_sel, uv).r > 0.5;
+}
+
+void main() {
+    vec4 c = texture(u_tex, v_uv);
+    vec2 q = floor(gl_FragCoord.xy / 12.0);
+    float k = mod(q.x + q.y, 2.0);
+    vec3 chk = mix(vec3(1.0), vec3(0.85), k);
+    vec3 col = c.rgb + chk * (1.0 - c.a);
+    if (u_hasSel == 1) {
+        vec2 dx = dFdx(v_uv);
+        vec2 dy = dFdy(v_uv);
+        bool me = inside(v_uv);
+        bool edge = inside(v_uv + dx) != me || inside(v_uv - dx) != me
+                 || inside(v_uv + dy) != me || inside(v_uv - dy) != me;
+        if (edge) {
+            float stripe = mod(floor((gl_FragCoord.x + gl_FragCoord.y) / 5.0 + u_time * 6.0), 2.0);
+            col = vec3(stripe);
+        } else if (!me) {
+            col *= 0.92;
+        }
+    }
+    o = vec4(col, 1.0);
+}
+"""
+
+    /** 스타일러스 호버 시 브러시 크기 원. 흰/검 이중선이라 어떤 배경에서도 보입니다. */
+    const val CURSOR_FS = """#version 300 es
+precision highp float;
+uniform vec2 u_center;
+uniform float u_radius;
+out vec4 o;
+void main() {
+    float d = length(gl_FragCoord.xy - u_center);
+    float dark = 1.0 - smoothstep(0.4, 1.1, abs(d - u_radius));
+    float light = 1.0 - smoothstep(0.4, 1.1, abs(d - u_radius - 1.4));
+    float dot0 = 1.0 - smoothstep(0.6, 1.4, d);
+    float a = max(max(dark, light * 0.9), dot0);
+    vec3 col = mix(vec3(1.0), vec3(0.0), max(dark, dot0));
+    o = vec4(col * a, a);
+}
+"""
+
+    /**
+     * 브러시 스탬프 (인스턴싱).
+     * i_center = 캔버스 px, i_params = (반지름, 회전각, 단축 비율, 알파)
+     * 타원 경계가 |v_local| = 1 이 되도록 하고, 안티에일리어싱용으로 1px 여유를 둡니다.
+     */
+    const val STAMP_VS = """#version 300 es
+layout(location = 0) in vec2 a_corner;
+layout(location = 1) in vec2 i_center;
+layout(location = 2) in vec4 i_params;
+uniform vec2 u_canvas;
+out vec2 v_local;
+out float v_alpha;
+out float v_aa;
+out vec2 v_canvasPos;
+void main() {
+    float r = i_params.x;
+    float ra = max(r * i_params.z, 0.35);
+    vec2 ext = vec2(r + 1.0, ra + 1.0);
+    v_local = a_corner * ext / vec2(r, ra);
+    v_aa = 1.0 / ra;
+    v_alpha = i_params.w;
+    float c = cos(i_params.y);
+    float s = sin(i_params.y);
+    vec2 off = a_corner * ext;
+    vec2 pos = i_center + vec2(off.x * c - off.y * s, off.x * s + off.y * c);
+    v_canvasPos = pos;
+    gl_Position = vec4(pos / u_canvas * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+    const val STAMP_FS = """#version 300 es
+precision highp float;
+precision highp int;
+in vec2 v_local;
+in float v_alpha;
+in float v_aa;
+in vec2 v_canvasPos;
+uniform float u_hardness;
+uniform float u_grain;
+uniform float u_grainScale;
+uniform int u_useTip;
+uniform sampler2D u_tip;
+out vec4 o;
+
+float hash(vec2 p) {
+    uvec2 q = uvec2(ivec2(p) + 65536) * uvec2(1597334673u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334673u;
+    return float(n) * (1.0 / 4294967295.0);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main() {
+    float a;
+    if (u_useTip == 1) {
+        if (abs(v_local.x) > 1.0 || abs(v_local.y) > 1.0) discard;
+        a = texture(u_tip, v_local * 0.5 + 0.5).r;
+    } else {
+        float d = length(v_local);
+        float w = max(v_aa, 1.0 - u_hardness);
+        a = clamp((1.0 - d) / w, 0.0, 1.0);
+        a = a * a * (3.0 - 2.0 * a);
+    }
+    if (u_grain > 0.0) {
+        vec2 gp = v_canvasPos / u_grainScale;
+        float n = noise(gp * 0.8) * 0.65 + noise(gp * 0.27) * 0.35;
+        a *= mix(1.0, smoothstep(0.3, 0.7, n), u_grain);
+    }
+    o = vec4(a * v_alpha);
+}
+"""
+}

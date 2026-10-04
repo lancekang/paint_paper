@@ -1,0 +1,13 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.kotlin/
+
+# 빌드·설치 로그
+/build_*.txt
+/install*.txt
+**/build_sym.txt

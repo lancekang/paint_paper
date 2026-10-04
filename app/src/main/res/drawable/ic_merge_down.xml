@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- tools/icons/gen_icons.js 로 생성된 파일입니다. 직접 고치지 말고 생성기를 고치세요. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M12,2v9" />
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M8.5,7.5L12,11l3.5,-3.5" />
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M12,12.5L3,17l9,4.5l9,-4.5Z" />
+</vector>

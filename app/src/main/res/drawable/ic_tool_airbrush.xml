@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- tools/icons/gen_icons.js 로 생성된 파일입니다. 직접 고치지 말고 생성기를 고치세요. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M5,10h5a2,2 0 0,1 2,2v7a2,2 0 0,1 -2,2h-5a2,2 0 0,1 -2,-2v-7a2,2 0 0,1 2,-2Z" />
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M6,6h3a1,1 0 0,1 1,1v2a1,1 0 0,1 -1,1h-3a1,1 0 0,1 -1,-1v-2a1,1 0 0,1 1,-1Z" />
+    <path android:strokeColor="#E9E9EB" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M7.5,6V4h3" />
+    <path android:fillColor="#E9E9EB"
+        android:pathData="M15.1,7a0.9,0.9 0 1,0 1.8,0a0.9,0.9 0 1,0 -1.8,0" />
+    <path android:fillColor="#E9E9EB"
+        android:pathData="M18.6,4.5a0.9,0.9 0 1,0 1.8,0a0.9,0.9 0 1,0 -1.8,0" />
+    <path android:fillColor="#E9E9EB"
+        android:pathData="M18.6,9.5a0.9,0.9 0 1,0 1.8,0a0.9,0.9 0 1,0 -1.8,0" />
+    <path android:fillColor="#E9E9EB"
+        android:pathData="M15.6,11.5a0.9,0.9 0 1,0 1.8,0a0.9,0.9 0 1,0 -1.8,0" />
+    <path android:fillColor="#E9E9EB"
+        android:pathData="M20.1,13a0.9,0.9 0 1,0 1.8,0a0.9,0.9 0 1,0 -1.8,0" />
+</vector>

@@ -1,0 +1,126 @@
+package kr.dfluid.paint.document
+
+import java.nio.ByteBuffer
+
+/** 커맨드가 문서를 바꿀 때 쓰는 인터페이스. CanvasRenderer가 GL 스레드에서 구현합니다. */
+interface LayerStore {
+    /** 타일 하나 읽기. 없는 타일 = null */
+    fun readTile(layerId: Int, key: Int): ByteBuffer?
+    /** 타일 하나 쓰기. null = 타일 제거 */
+    fun writeTile(layerId: Int, key: Int, data: ByteBuffer?)
+
+    /**
+     * 트리를 shape 대로 다시 만듭니다.
+     * shape에 없는 살아 있는 레이어 → 픽셀을 parked로 옮기고 GPU에서 해제,
+     * shape에 있는데 살아 있지 않은 레이어 → parked에서 꺼내 복원 (없으면 빈 레이어).
+     */
+    fun applyShape(shape: TreeShape, activeId: Int, parked: MutableMap<Int, Map<Int, ByteBuffer>>)
+
+    /** RLE로 압축된 선택 마스크 (SelectionMask.encode). null = 선택 없음 */
+    fun setSelectionMask(encoded: ByteArray?)
+}
+
+interface HistoryCommand {
+    val bytes: Long
+    fun undo(s: LayerStore)
+    fun redo(s: LayerStore)
+}
+
+/**
+ * 실행취소 스택. GL 스레드에서만 사용합니다.
+ * 스냅샷은 CPU 메모리에 있으므로 GL 컨텍스트를 잃어도 남습니다.
+ */
+class History(
+    private val maxSteps: Int = 100,
+    private val maxBytes: Long = 512L * 1024 * 1024,
+) {
+    private val undoStack = ArrayDeque<HistoryCommand>()
+    private val redoStack = ArrayDeque<HistoryCommand>()
+
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
+    val canRedo: Boolean get() = redoStack.isNotEmpty()
+
+    fun push(cmd: HistoryCommand) {
+        redoStack.clear()
+        undoStack.addLast(cmd)
+        trim()
+    }
+
+    private fun trim() {
+        var total = undoStack.sumOf { it.bytes }
+        while (undoStack.size > 1 && (undoStack.size > maxSteps || total > maxBytes)) {
+            total -= undoStack.removeFirst().bytes
+        }
+    }
+
+    fun undo(s: LayerStore): Boolean {
+        val c = undoStack.removeLastOrNull() ?: return false
+        c.undo(s)
+        redoStack.addLast(c)
+        return true
+    }
+
+    fun redo(s: LayerStore): Boolean {
+        val c = redoStack.removeLastOrNull() ?: return false
+        c.redo(s)
+        undoStack.addLast(c)
+        return true
+    }
+
+    fun clear() {
+        undoStack.clear()
+        redoStack.clear()
+    }
+}
+
+/**
+ * 타일 단위 픽셀 변경. 실행취소/다시실행 모두 "현재 ↔ 보관본" 교환입니다.
+ * saved[key] = null 은 "그 타일이 없었다"는 뜻입니다.
+ */
+class TilesCommand(private val layerId: Int, private val saved: HashMap<Int, ByteBuffer?>) : HistoryCommand {
+    override val bytes: Long get() = saved.values.sumOf { (it?.capacity() ?: 0).toLong() }
+    override fun undo(s: LayerStore) = swap(s)
+    override fun redo(s: LayerStore) = swap(s)
+
+    private fun swap(s: LayerStore) {
+        for (k in saved.keys.toList()) {
+            val cur = s.readTile(layerId, k)
+            s.writeTile(layerId, k, saved[k])
+            saved[k] = cur
+        }
+    }
+}
+
+/** 트리 구조/속성 변경. 삭제된 레이어의 픽셀은 parked에 보관됩니다. */
+class StructureCommand(
+    private val before: TreeShape,
+    private val after: TreeShape,
+    private val activeBefore: Int,
+    private val activeAfter: Int,
+) : HistoryCommand {
+    private val parked = HashMap<Int, Map<Int, ByteBuffer>>()
+    override val bytes: Long
+        get() = parked.values.sumOf { m -> m.values.sumOf { it.capacity().toLong() } }
+
+    override fun undo(s: LayerStore) = s.applyShape(before, activeBefore, parked)
+    override fun redo(s: LayerStore) = s.applyShape(after, activeAfter, parked)
+}
+
+/** 선택 영역 변경. 마스크는 RLE로 압축해 보관합니다 (보통 수 KB). */
+class SelectionCommand(private val before: ByteArray?, private val after: ByteArray?) : HistoryCommand {
+    override val bytes: Long get() = ((before?.size ?: 0) + (after?.size ?: 0)).toLong()
+    override fun undo(s: LayerStore) = s.setSelectionMask(before)
+    override fun redo(s: LayerStore) = s.setSelectionMask(after)
+}
+
+/** 여러 커맨드를 한 단계로. 실행취소는 역순. */
+class CompoundCommand(private val parts: List<HistoryCommand>) : HistoryCommand {
+    override val bytes: Long get() = parts.sumOf { it.bytes }
+    override fun undo(s: LayerStore) {
+        for (i in parts.indices.reversed()) parts[i].undo(s)
+    }
+
+    override fun redo(s: LayerStore) {
+        for (p in parts) p.redo(s)
+    }
+}
