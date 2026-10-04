@@ -42,6 +42,13 @@ class AppSettings(context: Context) {
     var textVertical = false
     /** 애니메이션 재생 속도 */
     var animFps = 12
+    /** 서브 뷰 (참고 이미지 창) */
+    var subOpen = false
+    var subUri: String? = null
+    var subFx = 0.72f
+    var subFy = 0.55f
+    var subW = 320
+    var subH = 260
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
@@ -110,6 +117,12 @@ class AppSettings(context: Context) {
         textFont = prefs.getInt("textFont", 0).coerceIn(0, 2)
         textVertical = prefs.getBoolean("textVertical", false)
         animFps = prefs.getInt("animFps", 12)
+        subOpen = prefs.getBoolean("subOpen", false)
+        subUri = prefs.getString("subUri", null)
+        subFx = prefs.getFloat("subFx", 0.72f)
+        subFy = prefs.getFloat("subFy", 0.55f)
+        subW = prefs.getInt("subW", 320).coerceIn(160, 900)
+        subH = prefs.getInt("subH", 260).coerceIn(120, 900)
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
@@ -176,6 +189,12 @@ class AppSettings(context: Context) {
             .putInt("textFont", textFont)
             .putBoolean("textVertical", textVertical)
             .putInt("animFps", animFps)
+            .putBoolean("subOpen", subOpen)
+            .putString("subUri", subUri)
+            .putFloat("subFx", subFx)
+            .putFloat("subFy", subFy)
+            .putInt("subW", subW)
+            .putInt("subH", subH)
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)

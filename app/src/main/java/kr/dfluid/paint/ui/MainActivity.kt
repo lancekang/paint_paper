@@ -117,6 +117,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var transformBar: View
     // ---- 애니메이션 타임라인 ----
     private lateinit var animBar: LinearLayout
+    // ---- 서브 뷰 ----
+    private lateinit var subPanel: LinearLayout
+    private lateinit var subImage: RefImageView
+    private lateinit var subPickBtn: ImageView
+    private lateinit var subBtn: ImageView
+    /** 다시 만들어도 남는 참고 이미지 (테마를 바꿔 UI를 다시 만들 때) */
+    private var subBitmap: android.graphics.Bitmap? = null
     private lateinit var frameStrip: LinearLayout
     private lateinit var frameLabel: TextView
     private lateinit var playBtn: ImageView
@@ -443,6 +450,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         act(R.drawable.ic_view_fit, "화면에 맞춤", Action.VIEW_FIT)
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
         act(R.drawable.ic_view_flip, "화면 좌우 반전", Action.VIEW_FLIP)
+        subBtn = barBtn(R.drawable.ic_subview, "서브 뷰 (참고 이미지 창)") { toggleSubView() }
         group("그리기 보조")
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
@@ -655,6 +663,77 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = Ui.dp(ctx, 16f)
         })
+
+        // ---- 서브 뷰 (참고 이미지) ----
+        val subGrip = FloatingPanels.Grip(ctx, horizontal = true)
+        subImage = RefImageView(ctx).apply {
+            onPick = { c -> setPrimary(c); showHud("서브 뷰에서 색을 가져왔습니다") }
+            subBitmap?.let { setImage(it) }
+        }
+        val subHead = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(subGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 36f), Ui.dp(ctx, 22f)))
+            addView(Ui.text(ctx, "서브 뷰", 12.5f, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        fun subAct(icon: Int, tip: String, f: () -> Unit) = tips.bind(Ui.iconButton(ctx, icon, tip, 30f, ghost = true, onClick = f), tip).also {
+            subHead.addView(it, Ui.square(ctx, 30f).apply { leftMargin = Ui.dp(ctx, 2f) })
+        }
+        subAct(R.drawable.ic_file_open, "이미지 열기") { openSubImage() }
+        subPickBtn = subAct(R.drawable.ic_tool_eyedropper, "스포이드 (누른 곳의 색을 주색으로)") {
+            subImage.picking = !subImage.picking
+            Ui.setOn(subPickBtn, subImage.picking)
+        }
+        subAct(R.drawable.ic_view_fit, "창에 맞춤 (두 번 탭)") { subImage.fit() }
+        subAct(R.drawable.ic_close, "닫기") { toggleSubView() }
+        val subResize = View(ctx).apply {
+            background = Ui.rounded(Ui.BORDER, Ui.dp(ctx, 3f).toFloat())
+            Ui.setTip(this, "끌어서 크기 조절")
+        }
+        subPanel = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(ctx, 6f)
+            setPadding(p, p / 2, p, p)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 10f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            visibility = if (settings.subOpen) View.VISIBLE else View.GONE
+            addView(subHead, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(subImage, LinearLayout.LayoutParams(Ui.dp(ctx, settings.subW.toFloat()), Ui.dp(ctx, settings.subH.toFloat())).apply {
+                topMargin = Ui.dp(ctx, 4f)
+            })
+            addView(subResize, LinearLayout.LayoutParams(Ui.dp(ctx, 28f), Ui.dp(ctx, 8f)).apply {
+                gravity = Gravity.END
+                topMargin = Ui.dp(ctx, 4f)
+            })
+        }
+        // 오른쪽 아래 막대를 끌면 이미지 창 크기가 바뀝니다.
+        var rsX = 0f; var rsY = 0f; var rsW = 0; var rsH = 0
+        subResize.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    rsX = e.rawX; rsY = e.rawY
+                    rsW = subImage.layoutParams.width; rsH = subImage.layoutParams.height
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val lp = subImage.layoutParams
+                    lp.width = (rsW + (e.rawX - rsX)).toInt().coerceIn(Ui.dp(ctx, 160f), Ui.dp(ctx, 900f))
+                    lp.height = (rsH + (e.rawY - rsY)).toInt().coerceIn(Ui.dp(ctx, 120f), Ui.dp(ctx, 900f))
+                    subImage.layoutParams = lp
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val d = resources.displayMetrics.density
+                    settings.subW = (subImage.layoutParams.width / d).toInt()
+                    settings.subH = (subImage.layoutParams.height / d).toInt()
+                    settings.save()
+                }
+            }
+            true
+        }
+        root.addView(subPanel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        fp.add(subPanel, subGrip, moveY = true, settings.subFx, settings.subFy) { fx, fy ->
+            settings.subFx = fx; settings.subFy = fy; settings.save()
+        }
+        Ui.setOn(subBtn, settings.subOpen)
+        if (settings.subOpen && subBitmap == null) loadSubImage()
 
         // ---- 애니메이션 타임라인 바 ----
         val ab = LinearLayout(ctx).apply {
@@ -1278,6 +1357,45 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         for (i in 0 until frameStrip.childCount) Ui.setOn(frameStrip.getChildAt(i), i == frame)
     }
 
+    // =====================================================================
+    // 서브 뷰
+    // =====================================================================
+
+    private fun toggleSubView() {
+        settings.subOpen = !settings.subOpen
+        settings.save()
+        subPanel.visibility = if (settings.subOpen) View.VISIBLE else View.GONE
+        Ui.setOn(subBtn, settings.subOpen)
+        if (settings.subOpen && subBitmap == null) {
+            if (settings.subUri != null) loadSubImage() else openSubImage()
+        }
+    }
+
+    private fun openSubImage() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        startActivityForResult(intent, REQ_SUB_IMAGE)
+    }
+
+    /** settings.subUri의 이미지를 백그라운드에서 읽어 서브 뷰에 띄웁니다. */
+    private fun loadSubImage() {
+        val s = settings.subUri ?: return
+        val uri = Uri.parse(s)
+        io.execute {
+            val b = RefImageView.load(this, uri)
+            ui.post {
+                if (b == null) {
+                    Toast.makeText(this, "참고 이미지를 열 수 없습니다.", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                subBitmap = b
+                subImage.setImage(b)
+            }
+        }
+    }
+
     private fun togglePlayback() {
         if (animPlaying) stopPlayback() else {
             if (animCount <= 1) {
@@ -1823,6 +1941,17 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             REQ_EXPORT -> writePng(uri)
             REQ_EXPORT_PSD -> writePsd(uri)
             REQ_EXPORT_GIF -> writeGif(uri)
+            REQ_SUB_IMAGE -> {
+                try {
+                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "sub view permission", e)
+                }
+                settings.subUri = uri.toString()
+                settings.save()
+                subBitmap = null
+                loadSubImage()
+            }
         }
     }
 
@@ -1975,6 +2104,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_TIP = 13
         private const val REQ_EXPORT_PSD = 14
         private const val REQ_EXPORT_GIF = 15
+        private const val REQ_SUB_IMAGE = 16
         /** GIF 긴 변 최대 크기 (px) */
         private const val GIF_MAX = 800
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"
