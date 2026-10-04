@@ -30,7 +30,14 @@
   - **퀵 마스크** (`LayerProps.quickMask`): toggleQuickMask가 선택 → 맨 위 반투명 빨간 레이어(Compound: Structure + Selection), 끄면 알파 → 선택 + 레이어 삭제. 이 레이어에 그릴 때 MainActivity.brushColor가 빨강.
   - **색 카드**: 서클(ColorPickerView.wheel) / 사각형 / 중간색(MixGridView) / 세트(SwatchGridView). AppSettings.colorTab/mixCorners/palette.
   - **캔버스 편집** (`document/CanvasEdit.kt`): Resample/Resize/Rotate/Flip. `CanvasRenderer.editCanvas`가 captureData → 워커 스레드에서 레이어마다 Bitmap으로 변환 → GL 스레드에서 buildDocument(keepHistory = true). 실행취소는 `DocumentCommand`(보관본 한 벌, 교환 때마다 `LayerStore.captureAll/replaceAll`). 계산 중 그림이 바뀌면(version) 취소. 선택 영역은 해제.
-  - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널, 마스크·효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
+  - **밑그림 레이어** (`LayerProps.draft`): 화면엔 보이고 `cleanComposite`(hideDrafts로 잠깐 다시 합성)가 PNG·JPEG·GIF 내보내기와 채우기·자동 선택의 REF_ALL에서 뺌.
+  - **둘러싸고 칠하기** (`FloodFill.enclose`, `CanvasRenderer.fillEnclosed`): 채우기 도구 옵션. CanvasView가 Mode.SELECT(fillLasso)로 올가미를 받아 onFillLasso. 선 = 흰 바탕 위 어두움 ≥ (255−허용오차)/2, 올가미 밖·상자 테두리에서 닿는 칸을 뺀 나머지.
+  - **컷 나누기** (`CanvasRenderer.createFrame`, `shapeTiles`): 선택 경계로 "컷 N" 폴더 = 컷 영역(흰) + 그림(clip) + 테두리. 선택 범위 런처의 "컷".
+  - **떠 있는 보조 창**: 서브 뷰(`SubView.kt` RefImageView), 내비게이터(`NavigatorView.kt`, 렌더러 processNavigator가 0.5초마다 축소판), 퀵 액세스(MainActivity.rebuildQuick, AppSettings.quickActions = Action.name 목록). 모두 FloatingPanels로 옮기고 위치 저장.
+  - **색 카드 탭**: 서클/사각형/중간색/세트/슬라이더(`ColorSliders.kt`).
+  - **보조 도구 파일** (`BrushLibrary.exportBrush/importBrush`, .dfbrush = JSON + 팁 PNG base64). brushes.json의 `rev`로 기본 보조 도구를 한 번만 추가(유동화).
+  - **흑백 보기** (`CanvasRenderer.grayView`, DISPLAY_FS u_gray): 화면 표시만.
+  - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널과 레이어 마스크(채널 -2), 효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 
 ## 빌드 (Windows)
 
