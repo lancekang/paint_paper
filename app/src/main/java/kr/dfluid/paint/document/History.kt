@@ -40,6 +40,9 @@ class History(
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
 
+    /** 실행취소·다시실행 기록이 쓰는 CPU 메모리 (바이트) */
+    val totalBytes: Long get() = undoStack.sumOf { it.bytes } + redoStack.sumOf { it.bytes }
+
     fun push(cmd: HistoryCommand) {
         redoStack.clear()
         undoStack.addLast(cmd)

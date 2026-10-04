@@ -68,7 +68,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fun onTransformEnded()
         fun onRendererError(message: String)
         /** 성능 측정이 켜져 있으면 0.5초마다 */
-        fun onPerfStats(stats: PerfMonitor.Stats) = Unit
+        fun onPerfStats(stats: PerfMonitor.Stats, memory: String) = Unit
         /** 합성 벤치마크 결과 (여러 줄 문자열) */
         fun onBenchmarkDone(report: String) = Unit
     }
@@ -959,7 +959,26 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         drawScreen(d)
         processThumbnail()
         if (benchPhase != 0) benchFinish(d, benchStart)
-        perf.frameEnd()?.let { s -> main.post { listener.onPerfStats(s) } }
+        perf.frameEnd()?.let { s ->
+            val mem = memoryLine()
+            main.post { listener.onPerfStats(s, mem) }
+        }
+    }
+
+    /** 성능 패널용 메모리 요약: GPU(레이어 타일 + 캔버스 크기 작업 버퍼) · 실행취소 기록 (MB). */
+    private fun memoryLine(): String {
+        val mb = 1024.0 * 1024.0
+        val tiles = pool.allocated.toLong() * TILE_BYTES
+        var buffers = 0L
+        fun add(t: RenderTarget?) {
+            if (t != null) buffers += t.width.toLong() * t.height * t.bytesPerPixel
+        }
+        add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
+        pairs.forEach { add(it.a); add(it.b) }
+        return String.format(
+            "GPU %.0fMB (레이어 타일 %.0fMB · 작업 버퍼 %.0fMB, 합성 깊이 %d) · 실행취소 %.0fMB",
+            (tiles + buffers) / mb, tiles / mb, buffers / mb, pairs.size, history.totalBytes / mb
+        )
     }
 
     // =====================================================================

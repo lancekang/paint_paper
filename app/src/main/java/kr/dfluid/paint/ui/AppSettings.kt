@@ -53,6 +53,8 @@ class AppSettings(context: Context) {
     var topBarCollapsed = false
     var toolBarCollapsed = false
     var rightPanelCollapsed = false
+    /** 원근 자·동심원 자 상태 (GuideRuler.encode) */
+    var rulerState: String? = null
     /** 패널 위치 잠금 (손잡이 숨김) */
     var panelLock = false
 
@@ -93,6 +95,7 @@ class AppSettings(context: Context) {
         toolBarFy = prefs.getFloat("toolBarFy", 0.5f)
         rightPanelFx = prefs.getFloat("rightPanelFx", 1f)
         panelLock = prefs.getBoolean("panelLock", false)
+        rulerState = prefs.getString("rulerState", null)
         topBarCollapsed = prefs.getBoolean("topBarCollapsed", false)
         toolBarCollapsed = prefs.getBoolean("toolBarCollapsed", false)
         rightPanelCollapsed = prefs.getBoolean("rightPanelCollapsed", false)
@@ -146,6 +149,7 @@ class AppSettings(context: Context) {
             .putFloat("toolBarFy", toolBarFy)
             .putFloat("rightPanelFx", rightPanelFx)
             .putBoolean("panelLock", panelLock)
+            .putString("rulerState", rulerState)
             .putBoolean("topBarCollapsed", topBarCollapsed)
             .putBoolean("toolBarCollapsed", toolBarCollapsed)
             .putBoolean("rightPanelCollapsed", rightPanelCollapsed)

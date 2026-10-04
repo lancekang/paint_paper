@@ -35,6 +35,9 @@ class TilePool(private val keepFree: Int = 96) {
     var live = 0
         private set
 
+    /** GPU에 잡혀 있는 타일 수 (사용 중 + 재사용 대기) */
+    val allocated: Int get() = live + free.size
+
     fun acquire(): Tile {
         live++
         val t = free.removeLastOrNull() ?: create()

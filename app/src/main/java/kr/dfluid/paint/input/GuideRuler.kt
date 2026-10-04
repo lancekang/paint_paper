@@ -27,8 +27,49 @@ class GuideRuler {
 
     val on: Boolean get() = kind != Kind.OFF
 
+    /** 점들이 기준으로 삼는 캔버스 크기 (캔버스 크기가 바뀌면 비율대로 옮김) */
+    var docW = 0f
+        private set
+    var docH = 0f
+        private set
+
+    /** 캔버스 크기가 바뀌면 점들을 같은 비율 자리로 옮깁니다. 처음이면 기본 위치. */
+    fun fitCanvas(w: Float, h: Float) {
+        if (docW <= 0f || docH <= 0f) { reset(w, h); return }
+        if (w == docW && h == docH) return
+        val sx = w / docW
+        val sy = h / docH
+        for (i in 0 until 3) { vp[i * 2] *= sx; vp[i * 2 + 1] *= sy }
+        cx *= sx; cy *= sy
+        docW = w; docH = h
+    }
+
+    /** 설정 저장용 문자열 */
+    fun encode(): String = buildString {
+        append(kind.name).append(';').append(vpCount).append(';').append(docW).append(';').append(docH)
+        for (v in vp) append(';').append(v)
+        append(';').append(cx).append(';').append(cy)
+    }
+
+    /** [encode] 결과에서 복원. 실패하면 false. */
+    fun decode(s: String?): Boolean {
+        val p = s?.split(';') ?: return false
+        if (p.size != 12) return false
+        return try {
+            kind = Kind.valueOf(p[0])
+            vpCount = p[1].toInt().coerceIn(1, 3)
+            docW = p[2].toFloat(); docH = p[3].toFloat()
+            for (i in 0 until 6) vp[i] = p[4 + i].toFloat()
+            cx = p[10].toFloat(); cy = p[11].toFloat()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /** 캔버스 크기에 맞춰 기본 위치로. */
     fun reset(w: Float, h: Float) {
+        docW = w; docH = h
         val horizon = h * 0.42f
         when (vpCount) {
             1 -> { vp[0] = w * 0.5f; vp[1] = horizon }

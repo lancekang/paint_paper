@@ -160,6 +160,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         overlay.listener = this
         overlay.stylusSeen = { canvasView.stylusSeen }
         overlay.ruler = ruler
+        rulerPlaced = ruler.decode(settings.rulerState)
 
         // 캔버스와 오버레이는 한 번만 붙이고, 둘레 UI(buildChrome)만 테마 바뀔 때 다시 만듭니다.
         rootView = FrameLayout(this)
@@ -233,6 +234,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onPause() {
         ui.removeCallbacks(autosaveTick)
         dispatcher.releaseAll()
+        settings.rulerState = if (rulerPlaced) ruler.encode() else null
         settings.save()
         library.save()
         // 일시정지 전에 GL 스레드에서 픽셀을 CPU로 복사 → 컨텍스트 손실 대비 + 자동 저장
@@ -1013,7 +1015,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onDocumentReplaced(width: Int, height: Int, refit: Boolean) {
         // 캔버스 크기가 바뀌면 자 위치도 새 캔버스 기준으로
-        if (ruler.on) ruler.reset(width.toFloat(), height.toFloat()) else rulerPlaced = false
+        if (rulerPlaced) ruler.fitCanvas(width.toFloat(), height.toFloat())
+        overlay.invalidate()
         canvasView.onDocumentSize(width, height, refit)
         updateTitle()
     }
@@ -1069,7 +1072,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         transformBar.visibility = View.GONE
     }
 
-    override fun onPerfStats(stats: PerfMonitor.Stats) {
+    override fun onPerfStats(stats: PerfMonitor.Stats, memory: String) {
         if (perfPanel.visibility != View.VISIBLE) return
         val hz = refreshRate()
         val budget = 1000f / hz
@@ -1082,6 +1085,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             "화면 %.0fHz (1프레임 %.1fms)\nFPS %.0f · 프레임 처리 평균 %.1fms · 95%% %.1fms\n%s\n펜 지연 = 펜 이벤트 → 그 입력을 그린 프레임 완료. 화면 표시는 보통 1프레임 더.",
             hz, budget, stats.fps, stats.frameAvg, stats.frameP95, lat
         )
+        val rt = Runtime.getRuntime()
+        val heapMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)
+        perfText.append("\n메모리  $memory · 앱(Java) ${heapMb}MB / 최대 ${rt.maxMemory() / (1024 * 1024)}MB")
     }
 
     override fun onBenchmarkDone(report: String) {
