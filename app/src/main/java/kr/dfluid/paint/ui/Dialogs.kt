@@ -183,6 +183,48 @@ object Dialogs {
             .show()
     }
 
+    /** 필압 자동 조정: 시험 판에 평소처럼 여러 번 그으면 평소 필압이 가운데(0.5)가 되도록 감마를 제안 */
+    fun pressureCalibration(ctx: Context, s: AppSettings, onApply: (Float) -> Unit) {
+        val pad = Ui.dp(ctx, 20f)
+        var preview = s.pressureGamma
+        val board = PressurePad(ctx) { preview }
+        val info = Ui.text(ctx, "", 12.5f, Ui.TEXT)
+        fun refresh() {
+            val g = board.suggestGamma()
+            val m = board.median()
+            info.text = when {
+                g == null -> "펜으로 평소 선을 긋듯이 여러 번 그어 주세요. (${board.count} / 30)"
+                else -> String.format("평소 필압 %.2f → 제안 감마 %.2f%s", m ?: 0f, g, if (g < 0.9f) " (가볍게)" else if (g > 1.1f) " (무겁게)" else "")
+            }
+            g?.let { preview = it }
+        }
+        board.onChanged = { refresh() }
+        refresh()
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
+            minimumWidth = Ui.dp(ctx, 420f)
+            addView(board, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(info, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = Ui.dp(ctx, 8f)
+            })
+        }
+        val dlg = Ui.dialog(ctx)
+            .setTitle("필압 자동 조정")
+            .setView(body)
+            .setPositiveButton("적용") { _, _ -> board.suggestGamma()?.let(onApply) }
+            .setNegativeButton("취소", null)
+            .setNeutralButton("다시", null)
+            .create()
+        dlg.setOnShowListener {
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                preview = s.pressureGamma
+                board.clear()
+            }
+        }
+        dlg.show()
+    }
+
     fun settings(ctx: Context, s: AppSettings, onChanged: () -> Unit, onOpenShortcuts: () -> Unit, onThemeChanged: () -> Unit, onPanelsChanged: () -> Unit) {
         val pad = Ui.dp(ctx, 20f)
         // 감마 0.3 ~ 3.0 을 로그 스케일 슬라이더로
@@ -284,6 +326,13 @@ object Dialogs {
                 topMargin = Ui.dp(ctx, 2f); bottomMargin = Ui.dp(ctx, 12f)
             })
             addView(gamma.view)
+            addView(Ui.button(ctx, "필압 자동 조정… (평소처럼 그어서 맞추기)") {
+                pressureCalibration(ctx, s) { g ->
+                    s.pressureGamma = g
+                    gamma.set(gammaToP(g), gammaLabel(g))
+                    onChanged()
+                }
+            }, Ui.wrap())
             addView(finger, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = Ui.dp(ctx, 12f)
             })
