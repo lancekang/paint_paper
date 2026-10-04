@@ -125,6 +125,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // ---- 내비게이터 ----
     private lateinit var colorSliders: ColorSliders
     private lateinit var grayBtn: ImageView
+    // ---- 퀵 액세스 ----
+    private lateinit var quickPanel: LinearLayout
+    private lateinit var quickGrid: LinearLayout
+    private lateinit var quickBtn: ImageView
     private lateinit var navPanel: LinearLayout
     private lateinit var navView: NavigatorView
     private lateinit var navBtn: ImageView
@@ -483,6 +487,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         updateRulerButton()
         group("앱")
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
+        quickBtn = barBtn(R.drawable.ic_quick, "퀵 액세스 (자주 쓰는 기능 모음, + 로 추가 · 길게 눌러 빼기)") { toggleQuick() }
         barBtn(R.drawable.ic_keyboard, "단축키 설정") { openShortcutSettings() }
         barBtn(R.drawable.ic_settings, "설정 (테마·필압 등)") { showSettings() }
         panelBtn = barBtn(R.drawable.ic_panel, "오른쪽 패널 접기/펼치기") {
@@ -692,6 +697,31 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = Ui.dp(ctx, 16f)
         })
+
+        // ---- 퀵 액세스 ----
+        val quickGrip = FloatingPanels.Grip(ctx, horizontal = true)
+        quickGrid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        quickPanel = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(ctx, 6f)
+            setPadding(p, p / 2, p, p)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 10f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            visibility = if (settings.quickOpen) View.VISIBLE else View.GONE
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(quickGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 36f), Ui.dp(ctx, 22f)))
+                addView(Ui.text(ctx, "퀵 액세스", 12.5f, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(tips.bind(Ui.iconButton(ctx, R.drawable.ic_close, "닫기", 28f, ghost = true) { toggleQuick() }, "닫기"), Ui.square(ctx, 28f))
+            })
+            addView(quickGrid, LinearLayout.LayoutParams(Ui.dp(ctx, 252f), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 4f) })
+        }
+        rebuildQuick()
+        root.addView(quickPanel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        fp.add(quickPanel, quickGrip, moveY = true, settings.quickFx, settings.quickFy) { fx, fy ->
+            settings.quickFx = fx; settings.quickFy = fy; settings.save()
+        }
+        Ui.setOn(quickBtn, settings.quickOpen)
 
         // ---- 내비게이터 ----
         val navGrip = FloatingPanels.Grip(ctx, horizontal = true)
@@ -1192,6 +1222,66 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onNavigator(bitmap: Bitmap) {
         if (::navView.isInitialized && settings.navOpen) navView.setImage(bitmap) else bitmap.recycle()
+    }
+
+    private fun toggleQuick() {
+        settings.quickOpen = !settings.quickOpen
+        settings.save()
+        quickPanel.visibility = if (settings.quickOpen) View.VISIBLE else View.GONE
+        Ui.setOn(quickBtn, settings.quickOpen)
+    }
+
+    /** 퀵 액세스 버튼들 (3열) + 마지막에 "+" */
+    private fun rebuildQuick() {
+        quickGrid.removeAllViews()
+        val actions = settings.quickActions.mapNotNull { n -> Action.entries.firstOrNull { it.name == n } }
+        var row: LinearLayout? = null
+        val cells = actions.map { it as Action? } + listOf(null)
+        cells.forEachIndexed { i, a ->
+            if (i % 3 == 0) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                quickGrid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = Ui.dp(this@MainActivity, 3f) })
+            }
+            val b = if (a == null) Ui.button(this, "+") { addQuickAction() }
+            else Ui.button(this, a.label) { runQuick(a) }.apply {
+                maxLines = 2
+                textSize = 11.5f
+                setOnLongClickListener {
+                    settings.quickActions.remove(a.name)
+                    settings.save()
+                    rebuildQuick()
+                    showHud("퀵 액세스에서 뺐습니다: ${a.label}")
+                    true
+                }
+            }
+            tips.bind(b, a?.let { tips.text(it.label, it) } ?: "기능 추가")
+            row!!.addView(b, LinearLayout.LayoutParams(0, Ui.dp(this, 40f), 1f).apply { rightMargin = Ui.dp(this@MainActivity, 3f) })
+        }
+        val rest = (3 - cells.size % 3) % 3
+        repeat(rest) { row?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f)) }
+    }
+
+    private fun runQuick(a: Action) {
+        when (a.kind) {
+            kr.dfluid.paint.shortcut.ActionKind.TOOL -> { onToolKey(a, true, false); onToolKey(a, false, false) }
+            kr.dfluid.paint.shortcut.ActionKind.HOLD -> showHud("누르고 있는 동안만 쓰는 기능은 키보드로 쓰세요")
+            else -> onShortcut(a)
+        }
+    }
+
+    /** 담을 기능 고르기 (분류별, 이미 담은 것·누르고 있는 기능은 빼고) */
+    private fun addQuickAction() {
+        val list = Action.entries.filter { it.kind != kr.dfluid.paint.shortcut.ActionKind.HOLD && it.name !in settings.quickActions }
+        val labels = list.map { "${it.category} · ${it.label}" }.toTypedArray()
+        Ui.dialog(this)
+            .setTitle("퀵 액세스에 추가")
+            .setItems(labels) { _, i ->
+                settings.quickActions.add(list[i].name)
+                settings.save()
+                rebuildQuick()
+            }
+            .setNegativeButton("닫기", null)
+            .show()
     }
 
     private fun toggleNavigator() {

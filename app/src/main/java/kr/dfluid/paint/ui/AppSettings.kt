@@ -48,6 +48,11 @@ class AppSettings(context: Context) {
     var animFps = 12
     /** 서브 뷰 (참고 이미지 창) */
     var subOpen = false
+    /** 퀵 액세스: 담아 둔 동작 이름 (Action.name) */
+    val quickActions = arrayListOf("UNDO", "REDO", "TOOL_PEN", "TOOL_ERASER", "SELECT_NONE", "TRANSFORM")
+    var quickOpen = false
+    var quickFx = 0f
+    var quickFy = 1f
     /** 내비게이터 창 */
     var navOpen = false
     var navFx = 1f
@@ -134,6 +139,13 @@ class AppSettings(context: Context) {
         subOpen = prefs.getBoolean("subOpen", false)
         selLauncher = prefs.getBoolean("selLauncher", true)
         navOpen = prefs.getBoolean("navOpen", false)
+        quickOpen = prefs.getBoolean("quickOpen", false)
+        quickFx = prefs.getFloat("quickFx", 0f)
+        quickFy = prefs.getFloat("quickFy", 1f)
+        prefs.getString("quickActions", null)?.let { q ->
+            quickActions.clear()
+            quickActions.addAll(q.split(",").filter { it.isNotBlank() })
+        }
         navFx = prefs.getFloat("navFx", 1f)
         navFy = prefs.getFloat("navFy", 1f)
         subUri = prefs.getString("subUri", null)
@@ -214,6 +226,10 @@ class AppSettings(context: Context) {
             .putBoolean("subOpen", subOpen)
             .putBoolean("selLauncher", selLauncher)
             .putBoolean("navOpen", navOpen)
+            .putBoolean("quickOpen", quickOpen)
+            .putFloat("quickFx", quickFx)
+            .putFloat("quickFy", quickFy)
+            .putString("quickActions", quickActions.joinToString(","))
             .putFloat("navFx", navFx)
             .putFloat("navFy", navFy)
             .putString("subUri", subUri)
