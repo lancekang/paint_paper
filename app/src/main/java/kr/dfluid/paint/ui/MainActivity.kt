@@ -1015,7 +1015,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     /** 자 고르기: 끄기 / 원근 1·2·3점 / 동심원 / 위치 초기화 */
     private fun chooseRuler() {
-        val items = arrayOf("끄기", "원근 자 · 1점", "원근 자 · 2점", "원근 자 · 3점", "동심원 자", "소실점·중심 위치 초기화")
+        val items = arrayOf("끄기", "원근 자 · 1점", "원근 자 · 2점", "원근 자 · 3점", "동심원 자", "평행선 자 (빗금·속도선)", "방사선 자 (집중선)", "손잡이 위치 초기화")
         Ui.dialog(this)
             .setTitle("자")
             .setItems(items) { _, which ->
@@ -1026,7 +1026,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                     0 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.OFF
                     1, 2, 3 -> { ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE; ruler.vpCount = which }
                     4 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC
-                    5 -> rulerPlaced = false
+                    5 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.PARALLEL
+                    6 -> ruler.kind = kr.dfluid.paint.input.GuideRuler.Kind.RADIAL
+                    7 -> rulerPlaced = false
                 }
                 // 처음 켤 때, 소실점 개수가 바뀔 때, 초기화를 고를 때 기본 위치로
                 val P = kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE
@@ -1051,6 +1053,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             kr.dfluid.paint.input.GuideRuler.Kind.OFF -> "원근 자 · 동심원 자 (꺼짐)"
             kr.dfluid.paint.input.GuideRuler.Kind.PERSPECTIVE -> "원근 자 ${ruler.vpCount}점 (손잡이를 끌어 소실점 이동)"
             kr.dfluid.paint.input.GuideRuler.Kind.CONCENTRIC -> "동심원 자 (손잡이를 끌어 중심 이동)"
+            kr.dfluid.paint.input.GuideRuler.Kind.PARALLEL -> "평행선 자 (두 손잡이로 방향 정하기)"
+            kr.dfluid.paint.input.GuideRuler.Kind.RADIAL -> "방사선 자 (손잡이를 끌어 중심 이동)"
         }
         tips.relabel(rulerBtn, label)
     }

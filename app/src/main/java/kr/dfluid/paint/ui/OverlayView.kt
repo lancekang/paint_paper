@@ -496,6 +496,25 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
                 val s = viewport.scale
                 for (k in 1..12) canvas.drawCircle(a[0], a[1], diag / 12f * k * s, rulerLine)
             }
+            kr.dfluid.paint.input.GuideRuler.Kind.PARALLEL -> {
+                val vx = r.par[2] - r.par[0]; val vy = r.par[3] - r.par[1]
+                val l = hypot(vx, vy).coerceAtLeast(1e-3f)
+                val ux = vx / l * diag * 2f; val uy = vy / l * diag * 2f
+                // 방향에 수직으로 간격을 두고 평행선
+                val nx = -vy / l; val ny = vx / l
+                val step = diag / 16f
+                for (k in -24..24) {
+                    val ox = r.par[0] + nx * step * k; val oy = r.par[1] + ny * step * k
+                    line(ox - ux, oy - uy, ox + ux, oy + uy, if (k == 0) rulerMain else rulerLine)
+                }
+            }
+            kr.dfluid.paint.input.GuideRuler.Kind.RADIAL -> {
+                val far = diag * 3f
+                for (k in 0 until 48) {
+                    val t = (k * 7.5 * Math.PI / 180.0).toFloat()
+                    line(r.cx, r.cy, r.cx + far * cos(t), r.cy + far * sin(t), rulerLine)
+                }
+            }
             kr.dfluid.paint.input.GuideRuler.Kind.OFF -> Unit
         }
         canvas.restore()
