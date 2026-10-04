@@ -19,7 +19,7 @@ object FloodFill {
 
     fun run(
         ref: ByteBuffer, w: Int, h: Int, sx: Int, sy: Int,
-        tolerance: Int, gap: Int, expand: Int, selection: ByteBuffer?,
+        tolerance: Int, gap: Int, expand: Int, selection: ByteBuffer?, contiguous: Boolean = true,
     ): Result? {
         if (sx !in 0 until w || sy !in 0 until h) return null
         val n = w * h
@@ -50,8 +50,8 @@ object FloodFill {
             if (f[sy * w + sx].toInt() == 1) fillable = f
         }
 
-        // 3. 스캔라인 채우기
-        var region = scanlineFill(fillable, w, h, sx, sy)
+        // 3. 스캔라인 채우기 (이어지지 않은 곳도면 비슷한 색 전부)
+        var region = if (contiguous) scanlineFill(fillable, w, h, sx, sy) else fillable.copyOf()
 
         // 4. 틈 메우기로 줄어든 만큼 되돌리기 (선 픽셀은 제외)
         if (gap > 0 && fillable !== match) {

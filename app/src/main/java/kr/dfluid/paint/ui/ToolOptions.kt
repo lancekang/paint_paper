@@ -320,6 +320,9 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
             view.addView(toggleRow(listOf("모든 레이어", "현재 레이어", "참조 레이어"), s.wandRef) {
                 s.wandRef = it; s.save()
             }, lp(6f))
+            view.addView(toggleRow(listOf("이어진 곳만", "같은 색 전부"), if (s.wandContiguous) 0 else 1) {
+                s.wandContiguous = it == 0; s.save()
+            }, lp(4f))
             intSlider("허용 오차", 0, 100, { s.wandTolerance * 100 / 255 }, { s.wandTolerance = it * 255 / 100 }) { "$it" }
             intSlider("틈 메우기", 0, 10, { s.wandGap }, { s.wandGap = it }) { if (it == 0) "끔" else "${it}px" }
             intSlider("영역 확장", 0, 6, { s.wandExpand }, { s.wandExpand = it }) { "${it}px" }
@@ -359,6 +362,9 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         view.addView(toggleRow(listOf("모든 레이어", "현재 레이어", "참조 레이어"), s.fillRef) {
             s.fillRef = it; s.save()
         }, lp(6f))
+        view.addView(toggleRow(listOf("이어진 곳만", "같은 색 전부"), if (s.fillContiguous) 0 else 1) {
+            s.fillContiguous = it == 0; s.save()
+        }, lp(4f))
         intSlider("허용 오차", 0, 100, { s.fillTolerance * 100 / 255 }, { s.fillTolerance = it * 255 / 100 }) { "$it" }
         intSlider("틈 메우기", 0, 10, { s.fillGap }, { s.fillGap = it }) { if (it == 0) "끔" else "${it}px" }
         intSlider("영역 확장", 0, 6, { s.fillExpand }, { s.fillExpand = it }) { "${it}px" }

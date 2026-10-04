@@ -45,7 +45,8 @@ import kotlin.math.roundToInt
 
 /** 채우기 옵션. */
 /** [ref] = 어느 그림을 보고 영역을 찾을지: REF_ALL / REF_CURRENT / REF_MARKED */
-data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val ref: Int) {
+/** [contiguous] = false면 이어지지 않은 곳도 (캔버스 전체에서 비슷한 색) */
+data class FillOptions(val tolerance: Int, val gap: Int, val expand: Int, val ref: Int, val contiguous: Boolean = true) {
     companion object {
         const val REF_ALL = 0
         const val REF_CURRENT = 1
@@ -564,7 +565,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val targetId = n.id
         worker.execute {
             val res = try {
-                FloodFill.run(ref, w, h, x, y, opts.tolerance, opts.gap, opts.expand, sel)
+                FloodFill.run(ref, w, h, x, y, opts.tolerance, opts.gap, opts.expand, sel, opts.contiguous)
             } catch (e: OutOfMemoryError) {
                 main.post { listener.onRendererError("메모리가 부족해 채우지 못했습니다.") }
                 null
@@ -720,7 +721,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val docRef = d
         worker.execute {
             val res = try {
-                FloodFill.run(ref, w, h, x, y, opts.tolerance, opts.gap, opts.expand, null)
+                FloodFill.run(ref, w, h, x, y, opts.tolerance, opts.gap, opts.expand, null, opts.contiguous)
             } catch (e: OutOfMemoryError) {
                 main.post { listener.onRendererError("메모리가 부족해 자동 선택을 하지 못했습니다.") }
                 null

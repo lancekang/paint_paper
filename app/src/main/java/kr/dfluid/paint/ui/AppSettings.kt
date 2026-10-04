@@ -34,6 +34,9 @@ class AppSettings(context: Context) {
     var fillRef = FillOptions.REF_ALL
     var fillOpacity = 1f
     var wandTolerance = 10
+    /** 자동 선택·채우기: 이어진 곳만 (끄면 캔버스 전체에서 비슷한 색) */
+    var wandContiguous = true
+    var fillContiguous = true
     var wandGap = 0
     var wandExpand = 0
     /** 선택 영역 확장/축소/경계 흐리기 범위 (px) */
@@ -140,6 +143,8 @@ class AppSettings(context: Context) {
         fillRef = prefs.getInt("fillRef", if (prefs.getBoolean("fillReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         fillOpacity = prefs.getFloat("fillOpacity", 1f)
         wandTolerance = prefs.getInt("wandTolerance", 10)
+        wandContiguous = prefs.getBoolean("wandContiguous", true)
+        fillContiguous = prefs.getBoolean("fillContiguous", true)
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
         selModifyPx = prefs.getInt("selModifyPx", 4)
@@ -213,8 +218,8 @@ class AppSettings(context: Context) {
         }
     }
 
-    val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillRef)
-    val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandRef)
+    val fillOptions: FillOptions get() = FillOptions(fillTolerance, fillGap, fillExpand, fillRef, fillContiguous)
+    val wandOptions: FillOptions get() = FillOptions(wandTolerance, wandGap, wandExpand, wandRef, wandContiguous)
     val gradientSpec: GradientSpec get() = GradientSpec(gradientRadial, gradientPreset == 1, gradientPreset, gradientRepeat)
     /** 새 캔버스 배경색. null = 투명 */
     val newCanvasBackground: Int? get() = if (canvasTransparent) null else canvasBackground
@@ -244,6 +249,8 @@ class AppSettings(context: Context) {
             .putInt("fillRef", fillRef)
             .putFloat("fillOpacity", fillOpacity)
             .putInt("wandTolerance", wandTolerance)
+            .putBoolean("wandContiguous", wandContiguous)
+            .putBoolean("fillContiguous", fillContiguous)
             .putInt("wandGap", wandGap)
             .putInt("wandExpand", wandExpand)
             .putInt("selModifyPx", selModifyPx)
