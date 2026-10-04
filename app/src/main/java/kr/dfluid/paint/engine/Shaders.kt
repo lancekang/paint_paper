@@ -317,6 +317,15 @@ void main() {
     vec4 S = texture(u_src, v_uv);
     if (S.a <= 0.0) { o = vec4(0.0); return; }
     vec3 c = S.rgb / S.a;
+    if (u_kind == 9) {
+        // 흰색 빼기: a = 1 − 가장 밝은 성분의 반대, c' = (c − (1 − a)) / a  → 흰 바탕 위에서 원래 색
+        float aw = 1.0 - min(min(c.r, c.g), c.b);
+        if (aw <= 0.0) { o = vec4(0.0); return; }
+        vec3 cw = clamp((c - (1.0 - aw)) / aw, 0.0, 1.0);
+        float a2 = S.a * aw;
+        o = vec4(cw * a2, a2);
+        return;
+    }
     if (u_kind == 1) {
         vec3 h = rgb2hsv(c);
         h.x = fract(h.x + u_p.x / 360.0 + 1.0);

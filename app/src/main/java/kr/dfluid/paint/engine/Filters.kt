@@ -20,6 +20,8 @@ enum class FilterKind(val label: String, val shaderId: Int, val params: List<Fil
         FilterParam("대비", -100, 100, 0, "", 0.01f),
     )),
     INVERT("색 반전", 3, emptyList()),
+    /** 흰 바탕을 빼서 투명하게 (흰 바탕에 다시 올리면 원래와 같게). 스캔한 선화 정리용 */
+    WHITE_TO_ALPHA("휘도를 투명도로 (흰 바탕 빼기)", 9, emptyList()),
     LEVELS("레벨 보정", 7, listOf(
         FilterParam("입력 검정", 0, 254, 0, "", 1f / 255f),
         FilterParam("입력 흰색", 1, 255, 255, "", 1f / 255f),

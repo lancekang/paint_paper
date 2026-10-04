@@ -1935,7 +1935,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     /** 색조 보정 레이어 종류 고르기 (흐리기 계열은 빼고) → 만들고 바로 값 편집 */
     private fun chooseAdjustLayer() {
         if (transforming) commitTransform()
-        val kinds = FilterKind.entries.filter { !it.blurs }
+        val kinds = FilterKind.entries.filter { !it.blurs && it != FilterKind.WHITE_TO_ALPHA }
         Ui.dialog(this)
             .setTitle("색조 보정 레이어")
             .setItems(kinds.map { it.label }.toTypedArray()) { _, which ->
@@ -2013,6 +2013,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             }
         }
         if (kind == FilterKind.INVERT) body.addView(Ui.text(ctx, "색을 반전합니다.", 13f))
+        if (kind == FilterKind.WHITE_TO_ALPHA) body.addView(Ui.text(ctx, "흰 부분을 투명하게 바꿉니다. 흰 바탕 위에서는 그대로 보이고, 선만 남아 아래 색이 비칩니다 (스캔한 선화 정리).", 13f))
         val curveView = if (kind == FilterKind.TONE_CURVE) PressureCurveView(ctx).also { cv ->
             cv.points = curvePts
             cv.live = true
