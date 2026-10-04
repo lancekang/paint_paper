@@ -125,6 +125,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var smudgeBuf: RenderTarget? = null
     /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
     private var borderBufs: Array<RenderTarget>? = null
+    /** 톤 효과 결과 버퍼 (캔버스 크기) */
+    private var toneBuf: RenderTarget? = null
     private var smudgePatch: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
@@ -1342,6 +1344,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         add(smudgeBuf); add(smudgePatch)
         borderBufs?.forEach { add(it) }
+        add(toneBuf)
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -1594,6 +1597,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         maskTmp?.release(); maskTmp = null
         smudgeBuf?.release(); smudgeBuf = null
         borderBufs?.forEach { it.release() }; borderBufs = null
+        toneBuf?.release(); toneBuf = null
         smudgePatch?.release(); smudgePatch = null
         maskEditing = false
         pairs.forEach { it.release() }
@@ -1622,6 +1626,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         smudgeBuf = null
         smudgePatch = null
         borderBufs = null
+        toneBuf = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
@@ -2438,13 +2443,42 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return if (m > 0f) kotlin.math.ceil(m).toInt() + 2 else 0
     }
 
+    /** 톤 효과: 농도를 망점으로 바꾼 소스 ([r] 영역). */
+    private fun toneSrc(n: Node, src: Src, r: IRect): Src {
+        val d = doc!!
+        val srcTex = when (src) {
+            is Src.Tex -> src.t
+            is Src.Tiles -> {
+                val b = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
+                b[0].clear(r)
+                b[0].bind()
+                GlState.scissor(r)
+                GlState.off()
+                drawSourceCopy(src, 1f, r)
+                GlState.noScissor()
+                b[0]
+            }
+        }
+        val out = toneBuf ?: RenderTarget(d.width, d.height).also { toneBuf = it }
+        out.bind()
+        GlState.scissor(r)
+        GlState.off()
+        compositor.drawTone(srcTex.tex, d.width, d.height, n.props.toneCell, Math.toRadians(n.props.toneAngle.toDouble()).toFloat(), premul(n.props.toneColor, 1f))
+        GlState.noScissor()
+        return Src.Tex(out)
+    }
+
     private fun layerSrc(n: Node, r: IRect): Src {
         val bw = n.props.borderWidth
-        if (bw <= 0f) return maskedSrc(n, r)
+        val toned = n.props.toneCell > 0f
+        if (bw <= 0f) {
+            val m = maskedSrc(n, r)
+            return if (toned) toneSrc(n, m, r) else m
+        }
         val d = doc!!
         val reach = kotlin.math.ceil(bw).toInt() + 1
         val er = IRect.ofBounds((r.x - reach).toFloat(), (r.y - reach).toFloat(), (r.right + reach).toFloat(), (r.bottom + reach).toFloat(), d.width, d.height) ?: r
-        val src = maskedSrc(n, er)
+        val src = maskedSrc(n, er).let { if (toned) toneSrc(n, it, er) else it }
         val bufs = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
         // 이웃을 읽으려면 텍스처여야 합니다 (타일이면 한 장에 모음).
         val srcTex = when (src) {

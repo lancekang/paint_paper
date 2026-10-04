@@ -33,6 +33,7 @@ class Compositor {
     private val cursor = GlProgram(Shaders.QUAD_VS, Shaders.CURSOR_FS)
     private val filter = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_FS)
     private val borderH = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_H_FS)
+    private val tone = GlProgram(Shaders.QUAD_VS, Shaders.TONE_FS)
     private val borderV = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_V_FS)
     private val filterCombine = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_COMBINE_FS)
     private val viewMatrix = FloatArray(9)
@@ -210,6 +211,18 @@ class Compositor {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         unbind1()
+    }
+
+    /** 톤 효과: srcTex(캔버스 크기) → 현재 타깃. 블렌딩 끄고 호출. color = 프리멀티플라이드. */
+    fun drawTone(srcTex: Int, canvasW: Int, canvasH: Int, cell: Float, angleRad: Float, color: FloatArray) {
+        tone.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(tone.u("u_src"), 0)
+        GLES20.glUniform2f(tone.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        GLES20.glUniform1f(tone.u("u_cell"), cell)
+        GLES20.glUniform1f(tone.u("u_angle"), angleRad)
+        GLES20.glUniform4f(tone.u("u_color"), color[0], color[1], color[2], color[3])
+        quad.draw()
     }
 
     /** 경계 효과 1단계: srcTex(캔버스 크기 RGBA) → 현재 타깃. 블렌딩 끄고 호출. */

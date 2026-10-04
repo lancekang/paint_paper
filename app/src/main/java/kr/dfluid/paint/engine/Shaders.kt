@@ -413,6 +413,39 @@ void main() {
 }
 """
 
+    /**
+     * 톤 효과 (QUAD_VS, 캔버스 크기): 농도 = 알파 × (1 − 밝기)를 망점 크기로.
+     * 칸 간격 u_cell px, 각도 u_angle(라디안)으로 돌린 격자에서 칸 중심까지 거리 < 반지름이면 망점 색.
+     * 농도가 0.5를 넘으면 망점이 겹치도록 반지름을 칸 대각선까지 키웁니다 (검은 바탕에 흰 점처럼 보임).
+     */
+    const val TONE_FS = """#version 300 es
+precision highp float;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform vec2 u_canvas;
+uniform float u_cell;
+uniform float u_angle;
+uniform vec4 u_color;
+out vec4 o;
+void main() {
+    vec4 s = texture(u_src, v_cuv);
+    vec3 c = s.a > 0.0 ? s.rgb / s.a : vec3(1.0);
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    float dens = clamp(s.a * (1.0 - lum), 0.0, 1.0);
+    vec2 p = v_cuv * u_canvas;
+    float cs = cos(u_angle), sn = sin(u_angle);
+    vec2 q = vec2(cs * p.x + sn * p.y, -sn * p.x + cs * p.y) / u_cell;
+    vec2 f = fract(q) - 0.5;
+    float d = length(f) * u_cell;
+    // 넓이가 농도에 비례하는 반지름 (0.5 이상은 겹치는 원으로 근사)
+    float r = sqrt(dens / 3.14159265) * u_cell;
+    float aa = 0.75;
+    float cov = clamp((r - d) / aa + 0.5, 0.0, 1.0);
+    if (dens <= 0.002) cov = 0.0;
+    o = u_color * cov;
+}
+"""
+
     /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
     const val DISPLAY_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;

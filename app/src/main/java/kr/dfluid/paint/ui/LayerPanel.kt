@@ -133,6 +133,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
             "불투명한 부분을 선택 영역으로",
             if (info.kind == NodeKind.RASTER) (if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") else null,
+            if (info.kind == NodeKind.RASTER) (if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") else null,
             if (info.props.text != null) "래스터화 (텍스트를 일반 레이어로)" else null,
         ).filterNotNull().toTypedArray()
         Ui.dialog(ctx)
@@ -147,7 +148,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
                     6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
                     7 -> if (info.kind == NodeKind.RASTER) borderDialog(info) else Unit
-                    8 -> renderer.rasterizeText(info.id)
+                    8 -> if (info.kind == NodeKind.RASTER) toneDialog(info) else Unit
+                    9 -> renderer.rasterizeText(info.id)
                 }
             }
             .setNegativeButton("취소", null)
@@ -211,6 +213,64 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         }
         dlg.show()
         preview(false)
+    }
+
+    /** 톤 효과: 망점 간격·각도·색. 레이어의 농도(알파 × 어두움)가 망점 크기가 됩니다. */
+    private fun toneDialog(info: NodeInfo) {
+        val start = info.props
+        var cell = if (start.toneCell > 0f) start.toneCell else 8f
+        var angle = start.toneAngle
+        var color = start.toneColor
+        fun apply(record: Boolean) = renderer.setProps(info.id, start.copy(toneCell = cell, toneAngle = angle, toneColor = color), record, if (record) start else null)
+        val pad = Ui.dp(ctx, 20f)
+        val cellRow = Ui.SliderRow(ctx, "간격", 60)
+        cellRow.set((cell - 4f).roundToInt().coerceIn(0, 60), "${cell.roundToInt()}px")
+        cellRow.onChange = { p -> cell = 4f + p; cellRow.set(p, "${cell.roundToInt()}px"); apply(false) }
+        val angleRow = Ui.SliderRow(ctx, "각도", 90)
+        angleRow.set(angle.roundToInt().coerceIn(0, 90), "${angle.roundToInt()}°")
+        angleRow.onChange = { p -> angle = p.toFloat(); angleRow.set(p, "$p°"); apply(false) }
+        val swatch = View(ctx)
+        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), android.graphics.Color.GRAY) }
+        refresh()
+        val colorRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "망점 색", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(swatch, LinearLayout.LayoutParams(Ui.dp(ctx, 32f), Ui.dp(ctx, 26f)))
+            addView(Ui.hspace(ctx, 8f))
+            addView(Ui.button(ctx, "검정") { color = android.graphics.Color.BLACK; refresh(); apply(false) }, Ui.wrap())
+            addView(Ui.hspace(ctx, 4f))
+            addView(Ui.button(ctx, "색 지정…") { Dialogs.colorPicker(ctx, color) { c -> color = c; refresh(); apply(false) } }, Ui.wrap())
+        }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+            addView(cellRow.view)
+            addView(angleRow.view)
+            addView(colorRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 8f) })
+            addView(Ui.text(ctx, "레이어의 진한 정도(회색·불투명도)를 망점 크기로 바꿉니다. 회색으로 칠하면 톤이 됩니다. 픽셀은 그대로입니다.", 11.5f, Ui.MUTED).apply {
+                setPadding(0, Ui.dp(ctx, 8f), 0, 0)
+            })
+        }
+        var done = false
+        val dlg = Ui.dialog(ctx)
+            .setTitle("톤 효과 · ${info.props.name}")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ -> done = true; apply(true) }
+            .setNeutralButton("효과 끄기") { _, _ ->
+                done = true
+                renderer.setProps(info.id, start.copy(toneCell = 0f), true, start)
+            }
+            .setNegativeButton("취소", null)
+            .create()
+        dlg.setOnDismissListener { if (!done) renderer.setProps(info.id, start, false) }
+        dlg.window?.let { w ->
+            w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setGravity(Gravity.BOTTOM)
+        }
+        dlg.show()
+        apply(false)
     }
 
     private fun toggle(change: (LayerProps) -> LayerProps) {
@@ -334,6 +394,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.reference) append(" · 참조")
             if (p.text != null) append(" · 텍스트")
             if (p.borderWidth > 0f) append(" · 경계")
+            if (p.toneCell > 0f) append(" · 톤")
             if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }
