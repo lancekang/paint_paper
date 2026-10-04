@@ -45,6 +45,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val inputBlocked: Boolean
         /** 도형 도구: 종류(0 직선, 1 사각형, 2 타원, 3 올가미 채우기, 4 말풍선)와 채우기(0 선, 1 채우기, 2 둘 다) */
         val shapeKind: Int
+        val shapeSides: Int
         val shapeFill: Int
         /** 말풍선 안쪽 색 (보조색) */
         val balloonFillColor: Int
@@ -556,6 +557,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 outline = when (kind) {
                     1 -> floatArrayOf(l, t, r, t, r, b, l, b)
                     4 -> balloonPoints(l, t, r, b)
+                    5 -> polygonPoints(l, t, r, b, h.shapeSides, star = false)
+                    6 -> polygonPoints(l, t, r, b, h.shapeSides, star = true)
                     else -> ellipsePoints(l, t, r, b)
                 }
                 closed = true
@@ -592,6 +595,22 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         lastFill = if (wantFill && outline.size >= 6) outline else null
         // 말풍선은 미리보기에서 채우기를 빼고 선만 (채우기 색이 다르므로 확정 때 따로)
         renderer.setStrokeLine(combined, if (kind == 4) null else lastFill)
+    }
+
+    /** 정다각형 / 별 (안쪽 꼭짓점 = 바깥의 45%). 첫 꼭짓점이 위, 상자에 맞춰 늘림 */
+    private fun polygonPoints(l: Float, t: Float, r: Float, b: Float, sides: Int, star: Boolean): FloatArray {
+        val n = sides.coerceIn(3, 16)
+        val cx = (l + r) / 2f; val cy = (t + b) / 2f
+        val rx = (r - l) / 2f; val ry = (b - t) / 2f
+        val count = if (star) n * 2 else n
+        val out = FloatArray(count * 2)
+        for (k in 0 until count) {
+            val a = -PI / 2 + 2 * PI * k / count
+            val f = if (star && k % 2 == 1) 0.45f else 1f
+            out[k * 2] = cx + rx * f * kotlin.math.cos(a).toFloat()
+            out[k * 2 + 1] = cy + ry * f * kotlin.math.sin(a).toFloat()
+        }
+        return out
     }
 
     /** 말풍선: 타원 + 아래 왼쪽으로 뾰족한 꼬리. 꼬리가 붙는 둘레 구간을 꼭짓점으로 바꿉니다. */

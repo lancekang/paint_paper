@@ -40,6 +40,8 @@ class AppSettings(context: Context) {
     var selModifyPx = 4
     /** 도형 종류: 0 직선, 1 사각형, 2 타원, 3 올가미 채우기 */
     var shapeKind = 1
+    /** 도형 다각형·별의 꼭짓점 수 */
+    var shapeSides = 5
     /** 사각형·타원: 0 선, 1 채우기, 2 선 + 채우기 */
     var shapeFill = 0
     /** 새 텍스트의 기본값 */
@@ -137,7 +139,8 @@ class AppSettings(context: Context) {
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
         selModifyPx = prefs.getInt("selModifyPx", 4)
-        shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 4)
+        shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 6)
+        shapeSides = prefs.getInt("shapeSides", 5).coerceIn(3, 16)
         shapeFill = prefs.getInt("shapeFill", 0).coerceIn(0, 2)
         textSize = prefs.getFloat("textSize", 48f).coerceIn(4f, 1000f)
         textFont = prefs.getInt("textFont", 0).coerceIn(0, 2)
@@ -228,6 +231,7 @@ class AppSettings(context: Context) {
             .putInt("wandExpand", wandExpand)
             .putInt("selModifyPx", selModifyPx)
             .putInt("shapeKind", shapeKind)
+            .putInt("shapeSides", shapeSides)
             .putInt("shapeFill", shapeFill)
             .putFloat("textSize", textSize)
             .putInt("textFont", textFont)

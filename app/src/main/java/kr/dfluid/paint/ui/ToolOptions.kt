@@ -289,13 +289,19 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildShape() {
         val s = host.settings
-        view.addView(toggleRow(listOf("직선", "사각형", "타원", "올가미", "말풍선"), s.shapeKind) {
+        view.addView(toggleRow(listOf("직선", "사각", "타원", "올가미", "말풍선", "다각", "별"), s.shapeKind) {
+            val had = s.shapeKind >= 5
             s.shapeKind = it; s.save()
+            // 꼭짓점 수 슬라이더를 보이거나 숨김
+            if (had != (it >= 5)) view.post { rebuild() }
         }, lp(2f))
+        if (s.shapeKind >= 5) {
+            intSlider("꼭짓점", 3, 16, { s.shapeSides }, { s.shapeSides = it }) { "$it" }
+        }
         view.addView(toggleRow(listOf("선", "채우기", "선+채우기"), s.shapeFill) {
             s.shapeFill = it; s.save()
         }, lp(4f))
-        view.addView(hint("드래그해 그립니다. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미는 그린 모양 그대로 칠합니다. 말풍선은 안쪽 = 보조색, 테두리 = 주색."), lp())
+        view.addView(hint("드래그해 그립니다. 다각형·별은 끈 상자 안에 꼭짓점이 위로 오게. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미는 그린 모양 그대로 칠합니다. 말풍선은 안쪽 = 보조색, 테두리 = 주색."), lp())
     }
 
     // ---- 선택 ----
