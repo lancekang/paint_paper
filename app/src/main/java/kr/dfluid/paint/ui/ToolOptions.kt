@@ -31,6 +31,9 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         fun selectFromLayer()
         fun startTransform()
         fun onRecentColor(color: Int)
+        /** 보조 도구를 파일로 내보내기 / 파일에서 가져오기 */
+        fun exportBrushFile(brush: Brush)
+        fun importBrushFile()
     }
 
     val view = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -214,7 +217,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun presetMenu(b: Brush) {
         val lib = host.library
-        val items = arrayOf("이름 바꾸기", "설정…", "복제", "위로", "아래로", "삭제", "이 도구 기본값으로 되돌리기")
+        val items = arrayOf("이름 바꾸기", "설정…", "복제", "위로", "아래로", "삭제", "이 도구 기본값으로 되돌리기", "파일로 내보내기…", "파일에서 가져오기…")
         Ui.dialog(ctx)
             .setTitle(b.name)
             .setItems(items) { _, which ->
@@ -239,6 +242,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
                     6 -> Dialogs.confirm(ctx, "${tool.label}의 보조 도구를 기본값으로 되돌릴까요? 직접 만든 보조 도구는 사라집니다.", "되돌리기") {
                         lib.resetTool(tool); host.onBrushChanged(); rebuild()
                     }
+                    7 -> host.exportBrushFile(b)
+                    8 -> host.importBrushFile()
                 }
             }
             .show()

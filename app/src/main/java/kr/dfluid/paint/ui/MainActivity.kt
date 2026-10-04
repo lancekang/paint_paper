@@ -1318,6 +1318,27 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer.hideCursor()
     }
 
+    /** 내보낼 보조 도구 (파일 위치를 고르는 동안) */
+    private var pendingBrushExport: Brush? = null
+
+    override fun exportBrushFile(brush: Brush) {
+        pendingBrushExport = brush
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, brush.name.map { if (it.isLetterOrDigit() || it == ' ' || it == '-') it else '_' }.joinToString("") + ".dfbrush")
+        }
+        startActivityForResult(intent, REQ_BRUSH_EXPORT)
+    }
+
+    override fun importBrushFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQ_BRUSH_IMPORT)
+    }
+
     override fun editBrush(tool: Tool, brush: Brush) {
         BrushEditor.show(this, brush, library, pickImage = { cb -> pickTipImage(cb) }) {
             toolOptions.show(this.tool)
@@ -2167,6 +2188,32 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             REQ_EXPORT_PSD -> writePsd(uri)
             REQ_EXPORT_GIF -> writeGif(uri)
             REQ_IMPORT_LAYER -> readImageLayer(uri)
+            REQ_BRUSH_EXPORT -> {
+                val b = pendingBrushExport ?: return
+                pendingBrushExport = null
+                io.execute {
+                    try {
+                        val bytes = library.exportBrush(b)
+                        contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } ?: throw IllegalStateException("파일을 열 수 없습니다.")
+                        ui.post { showHud("보조 도구를 내보냈습니다") }
+                    } catch (e: Exception) {
+                        ui.post { Toast.makeText(this, "내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show() }
+                    }
+                }
+            }
+            REQ_BRUSH_IMPORT -> {
+                val bytes = try {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: Exception) { null }
+                val b = bytes?.takeIf { it.size < 8 * 1024 * 1024 }?.let { library.importBrush(it) }
+                if (b == null) {
+                    Toast.makeText(this, "보조 도구 파일(.dfbrush)이 아니거나 읽을 수 없습니다.", Toast.LENGTH_LONG).show()
+                } else {
+                    setTool(b.tool)
+                    onBrushChanged()
+                    showHud("${b.tool.label} · ${b.name} 을(를) 가져왔습니다")
+                }
+            }
             REQ_SUB_IMAGE -> {
                 try {
                     contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -2368,6 +2415,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_EXPORT_GIF = 15
         private const val REQ_SUB_IMAGE = 16
         private const val REQ_IMPORT_LAYER = 17
+        private const val REQ_BRUSH_EXPORT = 18
+        private const val REQ_BRUSH_IMPORT = 19
         /** GIF 긴 변 최대 크기 (px) */
         private const val GIF_MAX = 800
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"

@@ -207,6 +207,47 @@ class BrushLibrary(context: Context) {
         }
     }
 
+    /** 보조 도구 파일(.dfbrush): JSON {format, version, brush, tip(PNG base64 또는 없음)} */
+    fun exportBrush(b: Brush): ByteArray {
+        val o = org.json.JSONObject()
+            .put("format", "dfbrush")
+            .put("version", 1)
+            .put("brush", b.toJson())
+        b.tipId?.let { id ->
+            val f = File(tipDir, "$id.png")
+            if (f.exists()) o.put("tip", android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP))
+        }
+        return o.toString().toByteArray(Charsets.UTF_8)
+    }
+
+    /** [exportBrush] 파일을 읽어 그 도구의 보조 도구로 추가합니다. 새 id를 붙이고 팁도 새 id로 저장. 실패하면 null. */
+    fun importBrush(bytes: ByteArray): Brush? {
+        val o = try { org.json.JSONObject(String(bytes, Charsets.UTF_8)) } catch (e: Exception) { return null }
+        if (o.optString("format") != "dfbrush") return null
+        val bj = o.optJSONObject("brush") ?: return null
+        var b = Brush.fromJson(bj) ?: return null
+        var tipId: String? = null
+        o.optString("tip", "").takeIf { it.isNotEmpty() }?.let { s ->
+            try {
+                val png = android.util.Base64.decode(s, android.util.Base64.NO_WRAP)
+                // 그림인지 확인한 뒤 저장
+                val bmp = BitmapFactory.decodeByteArray(png, 0, png.size)
+                if (bmp != null) {
+                    bmp.recycle()
+                    val id = UUID.randomUUID().toString()
+                    File(tipDir, "$id.png").writeBytes(png)
+                    tipId = id
+                }
+            } catch (e: Exception) {
+            }
+        }
+        b = b.copy(id = UUID.randomUUID().toString(), tipId = tipId)
+        add(b.tool, b)
+        setActive(b.tool, b.id)
+        save()
+        return b
+    }
+
     /** UI 스레드와 GL 스레드(벡터 선 다시 그리기)에서 불림 */
     @Synchronized
     fun tip(id: String): TipImage? {
