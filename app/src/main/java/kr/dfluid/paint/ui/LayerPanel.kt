@@ -366,6 +366,40 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             setOnClickListener { renderer.selectNode(info.id) }
             setOnLongClickListener { rename(info); true }
         }
+        // 오른쪽 끝 손잡이를 끌어 순서 바꾸기 (놓을 때 몇 칸 움직였는지로 이동)
+        val grip = ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_drag)
+            Ui.tint(this, Ui.MUTED)
+            val pad = Ui.dp(ctx, 6f)
+            setPadding(pad, pad, pad, pad)
+            Ui.setTip(this, "끌어서 순서 바꾸기")
+        }
+        var downY = 0f
+        grip.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    downY = e.rawY
+                    row.parent?.requestDisallowInterceptTouchEvent(true)
+                    // 여기서 선택하면 목록이 다시 만들어져 끌던 행이 떨어져 나가므로, 선택은 놓을 때
+                    row.background = Ui.rounded(Ui.ROW_ON, Ui.dp(ctx, 6f).toFloat(), Ui.dp(ctx, 1f), Ui.BUTTON_ON)
+                }
+                android.view.MotionEvent.ACTION_MOVE -> row.translationY = e.rawY - downY
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    val h = (row.height + Ui.dp(ctx, 2f)).coerceAtLeast(1)
+                    val steps = Math.round((e.rawY - downY) / h)
+                    row.translationY = 0f
+                    // 목록은 위 = 맨 위 레이어라, 아래로 끌면 쌓임 순서상 아래로 (선택 → 이동 순서로 큐에 들어감)
+                    if (steps != 0 && e.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                        if (info.id != activeId) renderer.selectNode(info.id)
+                        renderer.moveNodeSteps(-steps)
+                    } else {
+                        if (info.id != activeId) renderer.selectNode(info.id)
+                        row.post { rebuildList() }
+                    }
+                }
+            }
+            true
+        }
         row.addView(ImageView(ctx).apply {
             setImageResource(if (p.visible) R.drawable.ic_eye else R.drawable.ic_eye_off)
             Ui.tint(this, if (p.visible) Ui.TEXT else Ui.MUTED)
@@ -440,6 +474,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         }
         texts.addView(Ui.text(ctx, detail, 11f, Ui.SUBTEXT))
         row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(grip, Ui.square(ctx, 30f))
         return row
     }
 

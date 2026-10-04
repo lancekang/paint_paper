@@ -1338,45 +1338,56 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** +1 = 위로, -1 = 아래로. 폴더 경계에서는 폴더 밖/안으로 드나듭니다. */
-    fun moveNode(delta: Int) = post {
+    fun moveNode(delta: Int) = moveNodeSteps(delta)
+
+    /** 화면 목록에서 [steps]칸 (양수 = 위로) 옮깁니다. 여러 칸이어도 실행취소 한 단계. */
+    fun moveNodeSteps(steps: Int) = post {
         finishOp()
+        if (steps == 0) return@post
         structural { d ->
             val a = d.active ?: return@structural null
-            val parent = a.parent ?: return@structural null
-            val idx = a.index
-            if (delta > 0) {
-                when {
-                    idx == parent.children.lastIndex && parent.id != ROOT_ID -> {
-                        val gp = parent.parent!!
-                        parent.children.removeAt(idx)
-                        insert(gp, parent.index + 1, a)
-                    }
-                    idx < parent.children.lastIndex -> {
-                        val above = parent.children[idx + 1]
-                        parent.children.removeAt(idx)
-                        if (above.isFolder && above.props.expanded) insert(above, 0, a)
-                        else insert(parent, idx + 1, a)
-                    }
-                    else -> return@structural null
-                }
-            } else {
-                when {
-                    idx == 0 && parent.id != ROOT_ID -> {
-                        val gp = parent.parent!!
-                        parent.children.removeAt(idx)
-                        insert(gp, parent.index, a)
-                    }
-                    idx > 0 -> {
-                        val below = parent.children[idx - 1]
-                        parent.children.removeAt(idx)
-                        if (below.isFolder && below.props.expanded) insert(below, below.children.size, a)
-                        else insert(parent, idx - 1, a)
-                    }
-                    else -> return@structural null
-                }
-            }
-            a.id
+            var moved = false
+            repeat(kotlin.math.abs(steps)) { if (stepMove(a, if (steps > 0) 1 else -1)) moved = true }
+            if (moved) a.id else null
         }
+    }
+
+    /** 한 칸 옮기기. 더 갈 곳이 없으면 false */
+    private fun stepMove(a: Node, delta: Int): Boolean {
+        val parent = a.parent ?: return false
+        val idx = a.index
+        if (delta > 0) {
+            when {
+                idx == parent.children.lastIndex && parent.id != ROOT_ID -> {
+                    val gp = parent.parent!!
+                    parent.children.removeAt(idx)
+                    insert(gp, parent.index + 1, a)
+                }
+                idx < parent.children.lastIndex -> {
+                    val above = parent.children[idx + 1]
+                    parent.children.removeAt(idx)
+                    if (above.isFolder && above.props.expanded && !a.isAncestorOf(above)) insert(above, 0, a)
+                    else insert(parent, idx + 1, a)
+                }
+                else -> return false
+            }
+        } else {
+            when {
+                idx == 0 && parent.id != ROOT_ID -> {
+                    val gp = parent.parent!!
+                    parent.children.removeAt(idx)
+                    insert(gp, parent.index, a)
+                }
+                idx > 0 -> {
+                    val below = parent.children[idx - 1]
+                    parent.children.removeAt(idx)
+                    if (below.isFolder && below.props.expanded) insert(below, below.children.size, a)
+                    else insert(parent, idx - 1, a)
+                }
+                else -> return false
+            }
+        }
+        return true
     }
 
     fun mergeDown() = post {
