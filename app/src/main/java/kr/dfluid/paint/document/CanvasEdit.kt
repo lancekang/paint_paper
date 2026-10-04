@@ -44,12 +44,21 @@ sealed class CanvasEdit {
             val (nw, nh) = e.newSize(data.width, data.height)
             fun conv(t: CpuTiles?): CpuTiles? = t?.let { transform(it, data.width, data.height, nw, nh, e) }
             // 텍스트 레이어: 캔버스 크기 변경(평행이동)은 위치만 옮기고, 그 밖에는 픽셀로 굳힙니다.
+            val dx = if (e is Resize) Math.round((nw - data.width) * e.ax).toFloat() else 0f
+            val dy = if (e is Resize) Math.round((nh - data.height) * e.ay).toFloat() else 0f
             fun props(p: LayerProps): LayerProps {
-                val t = p.text ?: return p
-                return if (e is Resize) p.copy(text = t.copy(x = t.x + Math.round((nw - data.width) * e.ax), y = t.y + Math.round((nh - data.height) * e.ay)))
-                else p.copy(text = null)
+                var q = p
+                // 벡터 선 데이터는 평행이동만 따라가고, 그 밖에는 일반 레이어로 굳힘
+                if (q.vector && e !is Resize) q = q.copy(vector = false)
+                val t = q.text ?: return q
+                return if (e is Resize) q.copy(text = t.copy(x = t.x + dx, y = t.y + dy)) else q.copy(text = null)
             }
-            val nodes = data.nodes.map { n -> NodeData(n.id, n.kind, props(n.props), n.parentId, conv(n.tiles), conv(n.maskTiles)) }
+            fun vec(n: NodeData): List<VStroke>? {
+                if (!n.props.vector || e !is Resize) return null
+                val m = floatArrayOf(1f, 0f, 0f, 1f, dx, dy)
+                return n.vector?.map { it.transformed(m) }
+            }
+            val nodes = data.nodes.map { n -> NodeData(n.id, n.kind, props(n.props), n.parentId, conv(n.tiles), conv(n.maskTiles), vec(n)) }
             return DocumentData(nw, nh, data.activeId, nodes)
         }
 

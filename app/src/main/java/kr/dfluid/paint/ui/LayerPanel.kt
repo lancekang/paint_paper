@@ -47,6 +47,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     /** 레이어 카드 머리글에 둘 버튼: 자주 쓰는 것만 (새 레이어, 새 폴더, 더보기). */
     val headerActions: List<ImageView> = listOf(
         icon(R.drawable.ic_layer_add, "새 레이어", Action.LAYER_NEW) { renderer.addLayer() },
+        icon(R.drawable.ic_vector_add, "새 벡터 레이어 (선 단위로 지우고 옮기기)") { renderer.addLayer(vector = true) },
         icon(R.drawable.ic_folder_add, "새 폴더", Action.LAYER_FOLDER) { renderer.addFolder() },
         icon(R.drawable.ic_more, "더보기 (순서 이동, 지우기, 폴더로 묶기, 이름 바꾸기)") { moreMenu() },
     )
@@ -135,7 +136,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (info.kind == NodeKind.RASTER) (if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") else null,
             if (info.kind == NodeKind.RASTER) (if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") else null,
             if (info.kind == NodeKind.RASTER) (if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") else null,
-            if (info.props.text != null) "래스터화 (텍스트를 일반 레이어로)" else null,
+            if (info.props.text != null || info.props.vector) "래스터화 (일반 레이어로)" else null,
         ).filterNotNull().toTypedArray()
         Ui.dialog(ctx)
             .setTitle(info.props.name)
@@ -413,6 +414,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.alphaLock) append(" · 잠금")
             if (p.reference) append(" · 참조")
             if (p.text != null) append(" · 텍스트")
+            if (p.vector) append(" · 벡터")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
             if (p.layerColorOn) append(" · 레이어 컬러")

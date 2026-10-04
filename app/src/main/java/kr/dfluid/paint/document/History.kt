@@ -24,6 +24,9 @@ interface LayerStore {
 
     /** 문서 전체를 [data]로 바꿉니다. 실행취소 기록은 그대로 두고 선택 영역은 해제합니다. */
     fun replaceAll(data: DocumentData)
+
+    /** 벡터 레이어의 선 목록 바꾸기 (픽셀은 함께 묶인 TilesCommand가) */
+    fun setVector(layerId: Int, strokes: List<VStroke>) {}
 }
 
 interface HistoryCommand {

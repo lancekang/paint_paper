@@ -31,6 +31,8 @@ import kr.dfluid.paint.document.ShapeEntry
 import kr.dfluid.paint.document.StructureCommand
 import kr.dfluid.paint.document.TextSpec
 import kr.dfluid.paint.document.TilesCommand
+import kr.dfluid.paint.document.VStroke
+import kr.dfluid.paint.document.VectorCommand
 import kr.dfluid.paint.document.TreeShape
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -123,6 +125,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var maskTmp: RenderTarget? = null
     /** 색 혼합: 작업 버퍼(캔버스 크기)와 스탬프 둘레 복사본 (필요할 때 만듦) */
     private var smudgeBuf: RenderTarget? = null
+    /** 벡터 레이어의 선 목록 (레이어 id → 선). 레이어를 지워도 실행취소용으로 남겨 둡니다 */
+    private val vectors = HashMap<Int, List<VStroke>>()
     /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
     private var borderBufs: Array<RenderTarget>? = null
     /** 톤 효과 결과 버퍼 (캔버스 크기) */
@@ -170,8 +174,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     /** 활성 레이어 위에 겹쳐 보여 주는 진행 중 작업. */
     private sealed class Op {
-        class Stroke(val brush: Brush, val color: FloatArray, val tipTex: Int) : Op() {
+        class Stroke(val brush: Brush, val color: FloatArray, val tipTex: Int, val colorInt: Int = 0) : Op() {
             var rect: IRect? = null
+            /** 벡터 레이어에 남길 스탬프 (받은 순서대로) */
+            val all = ArrayList<FloatArray>()
+            var fill: FloatArray? = null
+        }
+
+        /** 벡터 지우개: 닿은 선을 통째로 지움. saved = 처음 바꾸기 전 타일 */
+        class VErase(val layerId: Int, val before: List<VStroke>) : Op() {
+            var current: List<VStroke> = before
+            val saved = HashMap<Int, ByteBuffer?>()
         }
 
         /**
@@ -273,8 +286,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     /** tip = 사용자 팁 이미지 (R8, size×size). 처음 쓰는 팁이면 업로드합니다. */
     fun beginStroke(brush: Brush, color: Int, tip: kr.dfluid.paint.brush.TipImage?) = post {
-        val n = editableActive() ?: return@post
+        val n = editableActive(allowVector = true) ?: return@post
         finishOp()
+        val onVector = n.props.vector && !isMaskEdit(n)
+        if (onVector && brush.isBlend) {
+            reportError("벡터 레이어에는 색 혼합 도구를 쓸 수 없습니다. 레이어 ⋯ → 래스터화 하세요.")
+            return@post
+        }
+        if (onVector && brush.isEraser) {
+            op = Op.VErase(n.id, vectors[n.id] ?: emptyList())
+            return@post
+        }
         if (brush.isBlend) {
             beginSmudge(n, brush)
             return@post
@@ -282,15 +304,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val tipTex = if (tip != null) ensureTip(tip) else 0
         val c = premul(color, 1f)
         strokeBuf!!.clear()
-        op = Op.Stroke(brush, c, tipTex)
+        op = Op.Stroke(brush, c, tipTex, color)
         if (!n.props.visible) main.post { listener.onRendererError("숨겨진 레이어에 그리고 있습니다.") }
     }
 
     /** [channel] = 대칭 복제본 번호 (0 = 원본). 색 혼합이 복제본마다 직전 위치를 따로 기억합니다. */
     fun addStamps(stamps: FloatArray, channel: Int = 0) = post {
         (op as? Op.Smudge)?.let { smudgeStamps(it, stamps, channel); return@post }
+        (op as? Op.VErase)?.let { vectorErase(it, stamps); return@post }
         val o = op as? Op.Stroke ?: return@post
         val d = doc ?: return@post
+        o.all.add(stamps.copyOf())
         brushEngine.draw(strokeBuf!!, stamps, o.brush, o.tipTex)
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
         var i = 0
@@ -315,6 +339,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         strokeBuf!!.clear()
         val prev = o.rect
         o.rect = null
+        o.all.clear()
+        if (stamps.isNotEmpty()) o.all.add(stamps.copyOf())
+        o.fill = fill?.takeIf { it.size >= 6 }?.copyOf()
         // 채우기 다각형 (도형 도구): 먼저 커버리지로 올리고, 선 스탬프는 그 위에 최댓값으로 겹칩니다.
         if (fill != null && fill.size >= 6) o.rect = rasterizeFill(fill, d)
         if (stamps.isNotEmpty()) {
@@ -366,6 +393,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     fun cancelStroke() = post {
+        if (op is Op.VErase) {
+            finishOp(); return@post
+        }
         (op as? Op.Smudge)?.let { s ->
             op = null
             s.rect?.let { markDirty(it) }
@@ -455,7 +485,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectByColor(x: Int, y: Int, opts: FillOptions, selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive(allowText = true)
+        val n = if (opts.ref != FillOptions.REF_CURRENT) d.activeRaster ?: d.allNodes().firstOrNull { it.isRaster } else editableActive(allowText = true, allowVector = true)
         if (n == null) return@post
         cancelPreviewOps()
         val ref = referenceImage(d, n, opts.ref)
@@ -610,10 +640,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 텍스트 레이어를 일반 레이어로 (픽셀은 그대로, 더는 텍스트로 고칠 수 없음). */
     fun rasterizeText(id: Int) = post {
         val d = doc ?: return@post
-        val n = d.find(id)?.takeIf { it.props.text != null } ?: return@post
+        val n = d.find(id)?.takeIf { it.props.text != null || it.props.vector } ?: return@post
         finishOp()
         val before = d.shape()
-        n.props = n.props.copy(text = null)
+        n.props = n.props.copy(text = null, vector = false)
         history.push(StructureCommand(before, d.shape(), d.activeId, d.activeId))
         afterEdit()
     }
@@ -746,7 +776,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun selectFromLayer(selOp: SelOp) = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
-        val n = editableActive(allowText = true) ?: return@post
+        val n = editableActive(allowText = true, allowVector = true) ?: return@post
         cancelPreviewOps()
         val rgba = referenceImage(d, n, FillOptions.REF_CURRENT)
         val alpha = ByteArray(d.width * d.height)
@@ -892,7 +922,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun addMask() = post {
         finishOp()
         val d = doc ?: return@post
-        val n = editableActive() ?: return@post
+        val n = editableActive(allowVector = true) ?: return@post
         if (n.props.mask) {
             maskEditing = true
             notifyLayers()
@@ -971,13 +1001,14 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
-    fun addLayer() = post {
+    fun addLayer(vector: Boolean = false) = post {
         finishOp()
         structural { d ->
             val a = d.active
             val parent = a?.parent ?: d.root
             val idx = if (a != null) a.index + 1 else parent.children.size
-            val n = Node(d.newId(), NodeKind.RASTER, LayerProps(d.nextLayerName()))
+            val name = if (vector) "벡터 " + d.nextLayerName() else d.nextLayerName()
+            val n = Node(d.newId(), NodeKind.RASTER, LayerProps(name, vector = vector))
             insert(parent, idx, n)
             n.id
         }
@@ -1133,7 +1164,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val pixels = TilesCommand(below.id, saved)
         val before = d.shape()
         val activeBefore = d.activeId
-        if (below.props.text != null) below.props = below.props.copy(text = null)
+        if (below.props.text != null || below.props.vector) below.props = below.props.copy(text = null, vector = false)
         parent!!.children.removeAt(a.index)
         val after = d.shape()
         val struct = StructureCommand(before, after, activeBefore, below.id)
@@ -1147,7 +1178,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     fun clearLayer() = post {
         finishOp()
         val d = doc ?: return@post
-        val n = editableActive() ?: return@post
+        val n = editableActive(allowVector = true) ?: return@post
+        val onVector = n.props.vector && !isMaskEdit(n)
+        if (onVector && hasSelection) {
+            reportError("벡터 레이어는 선택 영역 안만 지울 수 없습니다. 지우개로 선을 지우거나 선택을 해제하세요.")
+            return@post
+        }
         if (hasSelection || isMaskEdit(n)) {
             // 마스크에서 "지우기" = 가리기 (선택이 없으면 전체)
             val (tex, rect) = selectionCoverage(d) ?: return@post
@@ -1158,7 +1194,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val saved = HashMap<Int, ByteBuffer?>()
             for (k in s.tiles.keys.toList()) saved[k] = s.read(k)
             s.clear()
-            history.push(TilesCommand(n.id, saved))
+            val old = vectors[n.id]
+            if (onVector && !old.isNullOrEmpty()) {
+                vectors[n.id] = emptyList()
+                history.push(CompoundCommand(listOf(TilesCommand(n.id, saved), VectorCommand(n.id, old, emptyList()))))
+            } else history.push(TilesCommand(n.id, saved))
             thumbQueue.add(n.id)
             afterEdit()
         }
@@ -1568,6 +1608,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         releaseAll()
         surfaces.putAll(newSurfaces)
+        vectors.clear()
+        for (n in data.nodes) n.vector?.let { vectors[n.id] = it }
         d.rebuild(data.nodes.map { ShapeEntry(it.id, it.kind, it.props, it.parentId) })
         d.activeId = if (d.find(data.activeId) != null) data.activeId else d.allNodes().firstOrNull { it.isRaster }?.id ?: 0
         strokeBuf = sb; selTex = sel; preview = pv; belowCache = below
@@ -1639,7 +1681,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private fun captureData(d: Document): DocumentData = DocumentData(
         d.width, d.height, d.activeId,
         d.shape().map { e ->
-            NodeData(e.id, e.kind, e.props, e.parentId, surfaces[e.id]?.toCpu(), if (e.props.mask) surfaces[-e.id]?.toCpu() else null)
+            NodeData(
+                e.id, e.kind, e.props, e.parentId, surfaces[e.id]?.toCpu(), if (e.props.mask) surfaces[-e.id]?.toCpu() else null,
+                if (e.props.vector) vectors[e.id] ?: emptyList() else null,
+            )
         }
     )
 
@@ -1656,7 +1701,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     // =====================================================================
 
     /** [allowText] = false면 텍스트 레이어도 거부합니다 (붓질·채우기·필터 등 픽셀을 직접 고치는 작업). */
-    private fun editableActive(allowText: Boolean = false): Node? {
+    private fun editableActive(allowText: Boolean = false, allowVector: Boolean = false): Node? {
         val d = doc ?: return null
         val n = d.active
         if (n == null || !n.isRaster) {
@@ -1665,6 +1710,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         if (!allowText && n.props.text != null) {
             reportError("텍스트 레이어입니다. 텍스트 도구로 고치거나, 레이어 ⋯ 메뉴에서 래스터화한 뒤 그리세요.")
+            return null
+        }
+        if (!allowVector && n.props.vector && !isMaskEdit(n)) {
+            reportError("벡터 레이어입니다. 펜·지우개·도형으로 그리거나, 레이어 ⋯ 메뉴에서 래스터화하세요.")
             return null
         }
         return n
@@ -1689,7 +1738,31 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             is Op.Stroke -> {
                 op = null
                 val rect = o.rect ?: return
-                commitCoverage(strokeBuf!!.tex, o.color, o.brush.opacity, rect, o.brush.isEraser, useSel = hasSelection)
+                // 벡터 레이어: 선 데이터도 남김 (픽셀과 한 번의 실행취소로)
+                val n = d.active
+                var extra: HistoryCommand? = null
+                var revert: (() -> Unit)? = null
+                if (n != null && n.props.vector && !isMaskEdit(n) && !o.brush.isEraser) {
+                    val total = o.all.sumOf { it.size }
+                    val st = FloatArray(total)
+                    var off = 0
+                    for (a in o.all) { System.arraycopy(a, 0, st, off, a.size); off += a.size }
+                    val old = vectors[n.id] ?: emptyList()
+                    val now = old + VStroke(st, o.brush, o.colorInt, o.fill)
+                    vectors[n.id] = now
+                    extra = VectorCommand(n.id, old, now)
+                    revert = { vectors[n.id] = old }
+                }
+                if (!commitCoverage(strokeBuf!!.tex, o.color, o.brush.opacity, rect, o.brush.isEraser, useSel = hasSelection, extra = extra)) revert?.invoke()
+            }
+            is Op.VErase -> {
+                op = null
+                if (o.current !== o.before) {
+                    history.push(CompoundCommand(listOf(TilesCommand(o.layerId, o.saved), VectorCommand(o.layerId, o.before, o.current))))
+                    version++
+                    thumbQueue.add(o.layerId)
+                    notifyHistory()
+                }
             }
             is Op.Gradient -> {
                 op = null
@@ -1717,7 +1790,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
             is Op.Transform -> endTransform(o)
             is Op.Filter -> endFilter(o)
-            is Op.Stroke, is Op.Smudge -> finishOp()
+            is Op.Stroke, is Op.Smudge, is Op.VErase -> finishOp()
             null -> Unit
         }
     }
@@ -1739,10 +1812,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 커버리지 텍스처 × 색을 활성 레이어에 확정. */
-    private fun commitCoverage(coverageTex: Int, color: FloatArray, opacity: Float, rect: IRect, eraser: Boolean, useSel: Boolean) {
-        val d = doc ?: return
+    /** 반환: 실제로 바뀐 픽셀이 있어 실행취소 단계를 남겼는지 */
+    private fun commitCoverage(coverageTex: Int, color: FloatArray, opacity: Float, rect: IRect, eraser: Boolean, useSel: Boolean, extra: HistoryCommand? = null): Boolean {
+        val d = doc ?: return false
         val sel = if (useSel) selTexIfAny() else 0
-        commitToActive(rect, eraser) {
+        return commitToActive(rect, eraser, extra) {
             compositor.drawMergeCoverage(coverageTex, color, opacity, sel, d.width, d.height)
         }
     }
@@ -1751,17 +1825,17 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
      * 활성 레이어의 rect 범위 타일에 draw()를 실행하고 실행취소 단계를 남깁니다.
      * draw()는 캔버스 좌표계 셰이더를 쓰면 됩니다 (타일 오프셋 뷰포트가 설정됨).
      */
-    private fun commitToActive(rect: IRect, eraser: Boolean, draw: () -> Unit) {
-        val d = doc ?: return
-        val n = d.active?.takeIf { it.isRaster } ?: return
+    private fun commitToActive(rect: IRect, eraser: Boolean, extra: HistoryCommand? = null, draw: () -> Unit): Boolean {
+        val d = doc ?: return false
+        val n = d.active?.takeIf { it.isRaster } ?: return false
         val target = editId(n)
-        val s = surfaces[target] ?: return
+        val s = surfaces[target] ?: return false
         // 마스크(알파 = 가림)에서는 그리기 = 드러내기(지움), 지우개 = 가리기(칠함). 투명 잠금은 무시.
         val onMask = target < 0
         val eraser = if (onMask) !eraser else eraser
         val lock = !onMask && n.props.alphaLock
         markDirty(rect)
-        if (eraser && lock) return
+        if (eraser && lock) return false
         val saved = HashMap<Int, ByteBuffer?>()
         for (key in s.keysIntersecting(rect)) {
             val existing = s.tiles[key]
@@ -1783,18 +1857,19 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         // 실제로 바뀐 게 없는 타일(새로 만들었다 바로 비운 것)은 기록에서 뺍니다.
         saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
-        if (saved.isEmpty()) return
-        history.push(TilesCommand(target, saved))
+        if (saved.isEmpty()) return false
+        history.push(if (extra != null) CompoundCommand(listOf(TilesCommand(target, saved), extra)) else TilesCommand(target, saved))
         version++
         thumbQueue.add(target)
         notifyHistory()
+        return true
     }
 
     // ---- 자유 변형 ----
 
     private fun beginTransformGl() {
         val d = doc ?: return
-        val n = editableActive(allowText = true) ?: return
+        val n = editableActive(allowText = true, allowVector = true) ?: return
         if (op is Op.Transform) return
         finishOp()
         val s = surfaces[editId(n)]!!
@@ -1899,6 +1974,30 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val ms2 = placeFloating(ms, mf, mb, o.maskMatrix()!!, o.whole, d)
             if (ms2.isNotEmpty()) parts.add(TilesCommand(-n.id, ms2))
             thumbQueue.add(-n.id)
+        }
+        // 벡터 레이어: 선 데이터도 같은 행렬로 옮기고 선명하게 다시 그림 (선택 영역만 옮기면 일반 레이어로 굳힘)
+        if (n.props.vector && !isMaskEdit(n)) {
+            val old = vectors[n.id] ?: emptyList()
+            if (hasSelection) {
+                val before = d.shape()
+                n.props = n.props.copy(vector = false)
+                parts.add(StructureCommand(before, d.shape(), n.id, n.id))
+                reportError("선택 영역만 변형해 벡터 레이어가 일반 레이어로 바뀌었습니다.")
+                notifyLayers()
+            } else if (old.isNotEmpty()) {
+                val m = o.m
+                val bx = o.bounds.x.toFloat()
+                val by = o.bounds.y.toFloat()
+                val mm = floatArrayOf(m[0], m[1], m[2], m[3], m[4] - (m[0] * bx + m[2] * by), m[5] - (m[1] * bx + m[3] * by))
+                val now = old.map { it.transformed(mm) }
+                vectors[n.id] = now
+                parts.add(VectorCommand(n.id, old, now))
+                val area = (transformedRect(o, d) ?: o.bounds).union(o.bounds)
+                // placeFloating이 보관한 원본(saved)은 그대로 두고, 새로 건드리는 타일만 더해 보관
+                val hadTiles = saved.isNotEmpty()
+                rasterStrokes(d, s, area, now, saved)
+                if (!hadTiles && saved.isNotEmpty()) parts.add(0, TilesCommand(n.id, saved))
+            }
         }
         // 텍스트 레이어: 평행이동만이면 위치를 옮기고, 회전·확대 등이면 픽셀로 굳힘
         n.props.text?.let { t ->
@@ -2081,6 +2180,74 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         version++
         thumbQueue.add(n.id)
         notifyHistory()
+    }
+
+    // ---- 벡터 ----
+
+    /** 지우개 스탬프에 닿은 선을 지우고, 그 선들이 있던 영역을 남은 선으로 다시 그립니다. */
+    private fun vectorErase(o: Op.VErase, stamps: FloatArray) {
+        val d = doc ?: return
+        val s = surfaces[o.layerId] ?: return
+        val cur = o.current
+        if (cur.isEmpty()) return
+        val keep = ArrayList<VStroke>(cur.size)
+        var area: IRect? = null
+        for (v in cur) {
+            var hit = false
+            var i = 0
+            while (i + 2 < stamps.size) {
+                if (v.hits(stamps[i], stamps[i + 1], stamps[i + 2])) { hit = true; break }
+                i += StrokeBuilder.FLOATS
+            }
+            if (hit) {
+                val b = v.bounds
+                IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height)?.let { area = it.union(area) }
+            } else keep.add(v)
+        }
+        val a = area ?: return
+        o.current = keep
+        vectors[o.layerId] = keep
+        rasterStrokes(d, s, a, keep, o.saved)
+    }
+
+    /**
+     * [area] 안을 비우고 [strokes] 중 겹치는 선을 그때와 같은 브러시로 다시 그립니다.
+     * 바꾸기 전 타일은 [saved]에 (이미 있으면 그대로) 보관합니다.
+     */
+    private fun rasterStrokes(d: Document, s: TileSurface, area: IRect, strokes: List<VStroke>, saved: HashMap<Int, ByteBuffer?>) {
+        val keys = s.keysIntersecting(area)
+        for (key in keys) {
+            if (!saved.containsKey(key)) saved[key] = s.read(key)
+            val t = s.getOrCreate(key)
+            s.bindCanvasSpace(key, t)
+            s.scissorCanvasRect(key, area.intersect(s.tileRect(key)) ?: continue)
+            GLES20.glClearColor(0f, 0f, 0f, 0f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GlState.noScissor()
+        }
+        val sb = strokeBuf!!
+        for (v in strokes) {
+            val b = v.bounds
+            val vr = IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height) ?: continue
+            val r = vr.intersect(area) ?: continue
+            sb.clear()
+            v.fill?.let { rasterizeFill(it, d) }
+            brushEngine.draw(sb, v.stamps, v.brush, v.brush.tipId?.let { tips[it] } ?: 0)
+            val c = premul(v.color, 1f)
+            for (key in s.keysIntersecting(r)) {
+                val tr = r.intersect(s.tileRect(key)) ?: continue
+                val t = s.getOrCreate(key)
+                s.bindCanvasSpace(key, t)
+                s.scissorCanvasRect(key, tr)
+                GlState.over()
+                compositor.drawMergeCoverage(sb.tex, c, v.brush.opacity, 0, d.width, d.height)
+                GlState.off()
+                GlState.noScissor()
+            }
+        }
+        for (key in keys) s.dropIfEmpty(key)
+        saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
+        markDirty(area)
     }
 
     // ---- 필터 ----
@@ -2705,6 +2872,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 compositor.drawAffine(o.floating.tex, o.bounds.w, o.bounds.h, o.m, d.width, d.height, 1f)
             }
             is Op.Smudge -> compositor.drawCopy(o.work.tex, 1f)
+            is Op.VErase -> drawSourceCopy(Src.Tiles(s), 1f, r)
             is Op.Filter -> {
                 drawSourceCopy(Src.Tiles(s), 1f, r)
                 o.bounds.intersect(r)?.let { fr ->
@@ -2856,6 +3024,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             surfaces[n.id]?.let { s.copyFrom(it) }
             surfaces[c.id] = s
             thumbQueue.add(c.id)
+            vectors[n.id]?.let { vectors[c.id] = it }
             if (n.props.mask) {
                 val m = TileSurface(d.width, d.height, pool)
                 surfaces[-n.id]?.let { m.copyFrom(it) }
@@ -2922,6 +3091,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     override fun captureAll(): DocumentData = captureData(doc!!)
+
+    override fun setVector(layerId: Int, strokes: List<VStroke>) {
+        vectors[layerId] = strokes
+    }
 
     override fun replaceAll(data: DocumentData) {
         buildDocument(data, keepHistory = true, refit = true)

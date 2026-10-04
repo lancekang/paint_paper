@@ -55,6 +55,8 @@ data class LayerProps(
     /** 레이어 컬러: 켜면 픽셀 색을 이 색으로 바꿔 보여 줌 (밑그림을 파랗게 등, 알파는 그대로) */
     val layerColorOn: Boolean = false,
     val layerColor: Int = 0xFF3D8BFF.toInt(),
+    /** 벡터 레이어: 선을 획 단위로 기억 (지우개 = 닿은 선 지우기, 변형해도 다시 그림) */
+    val vector: Boolean = false,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */
@@ -208,6 +210,8 @@ class NodeData(
     val tiles: CpuTiles?,
     /** 레이어 마스크 타일. 알파 = 가리는 정도 (0 = 보임, 255 = 숨김). 없는 타일 = 보임 */
     val maskTiles: CpuTiles? = null,
+    /** 벡터 레이어의 선 목록 */
+    val vector: List<VStroke>? = null,
 )
 
 class DocumentData(

@@ -63,6 +63,7 @@ object ProjectIO {
                 n.props.text?.let { o.put("text", it.toJson()) }
                 if (n.props.quickMask) o.put("quickMask", true)
                 if (n.props.borderWidth > 0f) o.put("borderWidth", n.props.borderWidth.toDouble()).put("borderColor", n.props.borderColor)
+                if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
                 if (n.props.toneCell > 0f) o.put("toneCell", n.props.toneCell.toDouble()).put("toneAngle", n.props.toneAngle.toDouble()).put("toneColor", n.props.toneColor)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
@@ -89,6 +90,11 @@ object ProjectIO {
                 bmp.compress(Bitmap.CompressFormat.PNG, 100, zip)
                 bmp.recycle()
                 zip.closeEntry()
+                if (n.props.vector) {
+                    zip.putNextEntry(ZipEntry("layers/${n.id}.vec"))
+                    zip.write(VStroke.encode(n.vector ?: emptyList()))
+                    zip.closeEntry()
+                }
                 if (n.props.mask) {
                     zip.putNextEntry(ZipEntry("layers/${n.id}_mask.png"))
                     val mb = assemble(data.width, data.height, n.maskTiles ?: emptyMap())
@@ -116,6 +122,7 @@ object ProjectIO {
     fun readDfp(input: InputStream, maxTextureSize: Int): DocumentData {
         var json: JSONObject? = null
         val images = HashMap<String, Bitmap>()
+        val vectors = HashMap<String, ByteArray>()
         try {
             ZipInputStream(BufferedInputStream(input, 1 shl 16)).use { zip ->
                 while (true) {
@@ -125,6 +132,11 @@ object ProjectIO {
                             val bytes = ByteArrayOutputStream()
                             zip.copyTo(bytes)
                             json = JSONObject(bytes.toString("UTF-8"))
+                        }
+                        entry.name.startsWith("layers/") && entry.name.endsWith(".vec") -> {
+                            val bytes = ByteArrayOutputStream()
+                            zip.copyTo(bytes)
+                            vectors[entry.name] = bytes.toByteArray()
                         }
                         entry.name.startsWith("layers/") && entry.name.endsWith(".png") -> {
                             val bmp = decode(zip) ?: throw IOException("레이어 이미지를 읽을 수 없습니다: ${entry.name}")
@@ -170,7 +182,10 @@ object ProjectIO {
                     val maskTiles = if (props.mask) {
                         images[o.optString("maskFile", "layers/${id}_mask.png")]?.let { split(it, w, h) } ?: emptyMap()
                     } else null
-                    nodes.add(NodeData(id, kind, props, parent, tiles, maskTiles))
+                    val vec = if (props.vector) vectors[o.optString("vectorFile", "layers/$id.vec")]?.let {
+                        try { VStroke.decode(it) } catch (e: Exception) { null }
+                    } ?: emptyList() else null
+                    nodes.add(NodeData(id, kind, props, parent, tiles, maskTiles, vec))
                 }
                 activeId = doc.optInt("active", nodes.firstOrNull { it.kind == NodeKind.RASTER }?.id ?: 0)
             }
@@ -205,6 +220,7 @@ object ProjectIO {
         toneColor = o.optInt("toneColor", 0xFF000000.toInt()),
         layerColorOn = o.optBoolean("layerColorOn", false),
         layerColor = o.optInt("layerColor", 0xFF3D8BFF.toInt()),
+        vector = o.optBoolean("vector", false),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */
