@@ -199,7 +199,17 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         }
         post.onStop = { host.settings.save() }
         listOf(size, op, hard).forEach { r -> r.onStop = { lib.save() } }
-        for (r in listOf(size, op)) view.addView(r.view, lp())
+        view.addView(size.view, lp())
+        // 크기 칩: 자주 쓰는 크기를 한 번에
+        val chips = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for (px in intArrayOf(3, 5, 10, 20, 40, 80)) {
+            chips.addView(Ui.button(ctx, "$px") {
+                lib.active(tool)?.let { it.size = px.toFloat(); refresh(); host.onBrushChanged(); lib.save() }
+            }.apply { textSize = 11f; minWidth = 0; minimumWidth = 0; setPadding(0, paddingTop, 0, paddingBottom) },
+                LinearLayout.LayoutParams(0, Ui.dp(ctx, 30f), 1f).apply { rightMargin = Ui.dp(ctx, 3f) })
+        }
+        view.addView(chips, lp(2f))
+        view.addView(op.view, lp())
         // 세부 설정은 접어 둡니다.
         val details = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
