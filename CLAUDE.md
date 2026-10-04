@@ -22,6 +22,9 @@
   - **선택 영역 편집** (`SelectionOps`): 확장/축소 = 챔퍼 거리 변환, 경계 흐리기 = 상자 흐림 3회. 백그라운드 계산 후 applyWand(REPLACE). 불투명한 부분 선택 = selectFromLayer.
   - **도형 도구** (Tool.SHAPE, isBrush = true라 보조 도구·크기를 씀): CanvasView Mode.SHAPE가 updateShape로 윤곽점을 만들고 `setStrokeLine(stamps, fill)`로 미리보기. 채우기 다각형은 CPU(Path → ALPHA_8)로 strokeBuf 영역에 올린 뒤 스탬프를 겹침. 종류·채우기는 AppSettings.shapeKind/shapeFill.
   - **텍스트 레이어** (`document/TextSpec.kt`, `LayerProps.text`): 픽셀은 TextSpec.render로 만든 타일. editableActive(allowText = false)가 붓질·채우기·필터를 막고, 변형은 허용(평행이동이면 위치 갱신, 아니면 래스터화). createText/updateText/rasterizeText. .dfp는 노드 JSON의 "text". 캔버스 편집 Resize는 위치를 옮기고 나머지는 래스터화.
+  - **경계 효과** (`LayerProps.borderWidth/borderColor`): layerSrc → maskedSrc 뒤에 borderBufs 3장으로 2패스 거리 변환(BORDER_H: 가로 최근접 거리, BORDER_V: 유클리드 거리 → 커버리지 × 색) 후 원본을 위에 겹침. ensureComposite가 dirty 영역과 미리보기 영역을 borderReach만큼 넓힘. 아래로 병합하면 효과는 빠짐(래스터화 안 함).
+  - **퀵 마스크** (`LayerProps.quickMask`): toggleQuickMask가 선택 → 맨 위 반투명 빨간 레이어(Compound: Structure + Selection), 끄면 알파 → 선택 + 레이어 삭제. 이 레이어에 그릴 때 MainActivity.brushColor가 빨강.
+  - **색 카드**: 서클(ColorPickerView.wheel) / 사각형 / 중간색(MixGridView) / 세트(SwatchGridView). AppSettings.colorTab/mixCorners/palette.
   - **캔버스 편집** (`document/CanvasEdit.kt`): Resample/Resize/Rotate/Flip. `CanvasRenderer.editCanvas`가 captureData → 워커 스레드에서 레이어마다 Bitmap으로 변환 → GL 스레드에서 buildDocument(keepHistory = true). 실행취소는 `DocumentCommand`(보관본 한 벌, 교환 때마다 `LayerStore.captureAll/replaceAll`). 계산 중 그림이 바뀌면(version) 취소. 선택 영역은 해제.
   - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널, 마스크·효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 

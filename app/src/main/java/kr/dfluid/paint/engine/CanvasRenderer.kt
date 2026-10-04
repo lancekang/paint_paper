@@ -123,6 +123,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var maskTmp: RenderTarget? = null
     /** 색 혼합: 작업 버퍼(캔버스 크기)와 스탬프 둘레 복사본 (필요할 때 만듦) */
     private var smudgeBuf: RenderTarget? = null
+    /** 경계 효과 작업 버퍼 3장 (캔버스 크기, 쓰는 레이어가 있을 때만 만듦) */
+    private var borderBufs: Array<RenderTarget>? = null
     private var smudgePatch: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
@@ -1339,6 +1341,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         add(smudgeBuf); add(smudgePatch)
+        borderBufs?.forEach { add(it) }
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -1590,6 +1593,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         tileTmp?.release(); thumbTarget?.release()
         maskTmp?.release(); maskTmp = null
         smudgeBuf?.release(); smudgeBuf = null
+        borderBufs?.forEach { it.release() }; borderBufs = null
         smudgePatch?.release(); smudgePatch = null
         maskEditing = false
         pairs.forEach { it.release() }
@@ -1617,6 +1621,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         maskTmp = null
         smudgeBuf = null
         smudgePatch = null
+        borderBufs = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
@@ -2298,6 +2303,14 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             if (compResult != null) return
             region = full
         }
+        // 경계 효과가 있으면 바뀐 곳 둘레의 테두리도 다시 그려야 합니다.
+        val reach = borderReach(d)
+        if (reach > 0 && region != full) {
+            region = IRect.ofBounds(
+                (region.x - reach).toFloat(), (region.y - reach).toFloat(),
+                (region.right + reach).toFloat(), (region.bottom + reach).toFloat(), d.width, d.height,
+            ) ?: region
+        }
         val root = pairAt(0)
         val kids = d.root.children
         val start = startIndex(d)
@@ -2320,7 +2333,14 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
 
         val active = d.active
-        if (op != null && active != null && active.isRaster) updatePreview(d, active, region)
+        if (op != null && active != null && active.isRaster) {
+            // 경계 효과는 영역 둘레까지 읽으므로 미리보기도 그만큼 넓게
+            val pr = if (reach > 0) IRect.ofBounds(
+                (region.x - reach).toFloat(), (region.y - reach).toFloat(),
+                (region.right + reach).toFloat(), (region.bottom + reach).toFloat(), d.width, d.height,
+            ) ?: region else region
+            updatePreview(d, active, pr)
+        }
 
         // 결과는 항상 같은 버퍼에 남깁니다. 블렌드 모드 핑퐁이 홀수 번 일어나면
         // 영역 밖 픽셀이 오래된 쪽 버퍼가 결과가 되기 때문입니다.
@@ -2411,7 +2431,54 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
      * 합성에 쓸 레이어 소스. 마스크가 켜져 있으면 임시 버퍼에 "레이어 × (1 − 마스크 알파)"를 만들어 돌려줍니다.
      * 임시 버퍼는 하나뿐이므로 돌려받은 즉시 그려야 합니다 (호출부는 모두 바로 drawSource).
      */
+    /** 보이는 레이어 중 가장 굵은 경계 효과가 닿는 거리 (px, 없으면 0) */
+    private fun borderReach(d: Document): Int {
+        var m = 0f
+        for (n in d.allNodes()) if (n.isRaster && n.props.borderWidth > 0f && n.props.visible) m = max(m, n.props.borderWidth)
+        return if (m > 0f) kotlin.math.ceil(m).toInt() + 2 else 0
+    }
+
     private fun layerSrc(n: Node, r: IRect): Src {
+        val bw = n.props.borderWidth
+        if (bw <= 0f) return maskedSrc(n, r)
+        val d = doc!!
+        val reach = kotlin.math.ceil(bw).toInt() + 1
+        val er = IRect.ofBounds((r.x - reach).toFloat(), (r.y - reach).toFloat(), (r.right + reach).toFloat(), (r.bottom + reach).toFloat(), d.width, d.height) ?: r
+        val src = maskedSrc(n, er)
+        val bufs = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
+        // 이웃을 읽으려면 텍스처여야 합니다 (타일이면 한 장에 모음).
+        val srcTex = when (src) {
+            is Src.Tex -> src.t
+            is Src.Tiles -> {
+                bufs[0].clear(er)
+                bufs[0].bind()
+                GlState.scissor(er)
+                GlState.off()
+                drawSourceCopy(src, 1f, er)
+                GlState.noScissor()
+                bufs[0]
+            }
+        }
+        // 1단계: 가로 거리 (er 전체)
+        bufs[1].bind()
+        GlState.scissor(er)
+        GlState.off()
+        compositor.drawBorderH(srcTex.tex, d.width, d.height, reach)
+        // 2단계: 테두리 색, 그 위에 원본 (r만)
+        val out = bufs[2]
+        out.bind()
+        GlState.scissor(r)
+        GlState.off()
+        compositor.drawBorderV(bufs[1].tex, d.width, d.height, reach, bw, premul(n.props.borderColor, 1f))
+        GlState.over()
+        compositor.drawCopy(srcTex.tex, 1f)
+        GlState.off()
+        GlState.noScissor()
+        return Src.Tex(out)
+    }
+
+    /** 마스크까지 적용한 레이어 소스. */
+    private fun maskedSrc(n: Node, r: IRect): Src {
         val base = sourceOf(n)
         if (!n.props.mask || !n.props.maskEnabled) return base
         val d = doc!!

@@ -369,6 +369,50 @@ void main() {
 }
 """
 
+    /**
+     * 경계 효과 1단계 (QUAD_VS, 캔버스 크기): 가로로 가장 가까운 불투명(알파 ≥ 0.5) 픽셀까지 거리 → r = 거리/255 (없으면 1).
+     */
+    const val BORDER_H_FS = """#version 300 es
+precision highp float;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform vec2 u_texel;
+uniform int u_r;
+out vec4 o;
+void main() {
+    float best = 255.0;
+    for (int i = -u_r; i <= u_r; i++) {
+        float a = texture(u_src, v_cuv + vec2(float(i) * u_texel.x, 0.0)).a;
+        if (a >= 0.5) best = min(best, abs(float(i)));
+    }
+    o = vec4(best / 255.0, 0.0, 0.0, 1.0);
+}
+"""
+
+    /**
+     * 경계 효과 2단계: 세로로 훑어 유클리드 거리 = min sqrt(가로거리² + dy²) → 테두리 커버리지 × 색 (프리멀티플라이드).
+     * 원본은 이 위에 일반 합성으로 겹칩니다.
+     */
+    const val BORDER_V_FS = """#version 300 es
+precision highp float;
+in vec2 v_cuv;
+uniform sampler2D u_h;
+uniform vec2 u_texel;
+uniform int u_r;
+uniform float u_width;
+uniform vec4 u_color;
+out vec4 o;
+void main() {
+    float best = 1.0e9;
+    for (int j = -u_r; j <= u_r; j++) {
+        float dx = texture(u_h, v_cuv + vec2(0.0, float(j) * u_texel.y)).r * 255.0;
+        if (dx < 254.5) best = min(best, dx * dx + float(j * j));
+    }
+    float cov = clamp(u_width + 0.5 - sqrt(best), 0.0, 1.0);
+    o = u_color * cov;
+}
+"""
+
     /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
     const val DISPLAY_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;

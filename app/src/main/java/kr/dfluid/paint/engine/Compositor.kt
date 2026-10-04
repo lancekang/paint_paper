@@ -32,6 +32,8 @@ class Compositor {
     private val display = GlProgram(Shaders.DISPLAY_VS, Shaders.DISPLAY_FS)
     private val cursor = GlProgram(Shaders.QUAD_VS, Shaders.CURSOR_FS)
     private val filter = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_FS)
+    private val borderH = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_H_FS)
+    private val borderV = GlProgram(Shaders.QUAD_VS, Shaders.BORDER_V_FS)
     private val filterCombine = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_COMBINE_FS)
     private val viewMatrix = FloatArray(9)
     private val affine = FloatArray(9)
@@ -208,6 +210,28 @@ class Compositor {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         unbind1()
+    }
+
+    /** 경계 효과 1단계: srcTex(캔버스 크기 RGBA) → 현재 타깃. 블렌딩 끄고 호출. */
+    fun drawBorderH(srcTex: Int, canvasW: Int, canvasH: Int, r: Int) {
+        borderH.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(borderH.u("u_src"), 0)
+        GLES20.glUniform2f(borderH.u("u_texel"), 1f / canvasW, 1f / canvasH)
+        GLES20.glUniform1i(borderH.u("u_r"), r)
+        quad.draw()
+    }
+
+    /** 경계 효과 2단계: 1단계 결과 → 테두리 색 × 커버리지. color = 프리멀티플라이드. */
+    fun drawBorderV(hTex: Int, canvasW: Int, canvasH: Int, r: Int, width: Float, color: FloatArray) {
+        borderV.use()
+        bindTex(0, hTex)
+        GLES20.glUniform1i(borderV.u("u_h"), 0)
+        GLES20.glUniform2f(borderV.u("u_texel"), 1f / canvasW, 1f / canvasH)
+        GLES20.glUniform1i(borderV.u("u_r"), r)
+        GLES20.glUniform1f(borderV.u("u_width"), width)
+        GLES20.glUniform4f(borderV.u("u_color"), color[0], color[1], color[2], color[3])
+        quad.draw()
     }
 
     /** view = [m00, m10, m01, m11, tx, ty, scale] (Viewport.toGl) */

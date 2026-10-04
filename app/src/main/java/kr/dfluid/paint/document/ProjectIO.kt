@@ -38,6 +38,8 @@ import kotlin.math.roundToInt
  */
 object ProjectIO {
     const val FORMAT = "dfpaint"
+    /** 경계 효과 최대 굵기 (px) */
+    const val MAX_BORDER = 40f
     const val VERSION = 2
     private const val THUMB = 256
 
@@ -60,6 +62,7 @@ object ProjectIO {
                     .put("reference", n.props.reference)
                 n.props.text?.let { o.put("text", it.toJson()) }
                 if (n.props.quickMask) o.put("quickMask", true)
+                if (n.props.borderWidth > 0f) o.put("borderWidth", n.props.borderWidth.toDouble()).put("borderColor", n.props.borderColor)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
                 if (n.kind == NodeKind.RASTER && n.props.mask) {
                     o.put("mask", true).put("maskEnabled", n.props.maskEnabled).put("maskFile", "layers/${n.id}_mask.png")
@@ -193,6 +196,8 @@ object ProjectIO {
         reference = o.optBoolean("reference", false),
         text = TextSpec.fromJson(o.optJSONObject("text")),
         quickMask = o.optBoolean("quickMask", false),
+        borderWidth = o.optDouble("borderWidth", 0.0).toFloat().coerceIn(0f, MAX_BORDER),
+        borderColor = o.optInt("borderColor", 0xFFFFFFFF.toInt()),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

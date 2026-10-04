@@ -132,6 +132,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             "이름 바꾸기",
             if (info.props.reference) "참조 레이어 해제" else "참조 레이어로 지정 (채우기·자동 선택이 이 레이어의 선을 봄)",
             "불투명한 부분을 선택 영역으로",
+            if (info.kind == NodeKind.RASTER) (if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") else null,
             if (info.props.text != null) "래스터화 (텍스트를 일반 레이어로)" else null,
         ).filterNotNull().toTypedArray()
         Ui.dialog(ctx)
@@ -145,11 +146,71 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     4 -> rename(info)
                     5 -> renderer.setProps(info.id, info.props.copy(reference = !info.props.reference), record = true)
                     6 -> renderer.selectFromLayer(kr.dfluid.paint.engine.SelOp.REPLACE)
-                    7 -> renderer.rasterizeText(info.id)
+                    7 -> if (info.kind == NodeKind.RASTER) borderDialog(info) else Unit
+                    8 -> renderer.rasterizeText(info.id)
                 }
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    /** 경계 효과: 굵기(0 = 끔)와 색. 움직이는 동안 미리보기, 확인하면 실행취소 한 단계. */
+    private fun borderDialog(info: NodeInfo) {
+        val start = info.props
+        var width = if (start.borderWidth > 0f) start.borderWidth else 4f
+        var color = start.borderColor
+        fun preview(record: Boolean) = renderer.setProps(info.id, start.copy(borderWidth = width, borderColor = color), record, if (record) start else null)
+        val pad = Ui.dp(ctx, 20f)
+        val row = Ui.SliderRow(ctx, "굵기", kr.dfluid.paint.document.ProjectIO.MAX_BORDER.toInt())
+        row.set(width.roundToInt(), "${width.roundToInt()}px")
+        row.onChange = { p ->
+            width = p.toFloat().coerceAtLeast(1f)
+            row.set(p, "${width.roundToInt()}px")
+            preview(false)
+        }
+        val swatch = View(ctx)
+        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), android.graphics.Color.GRAY) }
+        refresh()
+        val colorRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "색", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(swatch, LinearLayout.LayoutParams(Ui.dp(ctx, 32f), Ui.dp(ctx, 26f)))
+            addView(Ui.hspace(ctx, 8f))
+            for ((label, c) in listOf("흰색" to android.graphics.Color.WHITE, "검정" to android.graphics.Color.BLACK)) {
+                addView(Ui.button(ctx, label) { color = c; refresh(); preview(false) }, Ui.wrap())
+                addView(Ui.hspace(ctx, 4f))
+            }
+            addView(Ui.button(ctx, "색 지정…") { Dialogs.colorPicker(ctx, color) { c -> color = c; refresh(); preview(false) } }, Ui.wrap())
+        }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+            addView(row.view)
+            addView(colorRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 8f) })
+            addView(Ui.text(ctx, "불투명한 부분 둘레에 테두리를 그립니다. 레이어 픽셀은 바뀌지 않고, 내보낸 그림에는 들어갑니다.", 11.5f, Ui.MUTED).apply {
+                setPadding(0, Ui.dp(ctx, 8f), 0, 0)
+            })
+        }
+        var done = false
+        val dlg = Ui.dialog(ctx)
+            .setTitle("경계 효과 · ${info.props.name}")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ -> done = true; preview(true) }
+            .setNeutralButton("효과 끄기") { _, _ ->
+                done = true
+                renderer.setProps(info.id, start.copy(borderWidth = 0f), true, start)
+            }
+            .setNegativeButton("취소", null)
+            .create()
+        dlg.setOnDismissListener { if (!done) renderer.setProps(info.id, start, false) }
+        dlg.window?.let { w ->
+            w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setGravity(Gravity.BOTTOM)
+        }
+        dlg.show()
+        preview(false)
     }
 
     private fun toggle(change: (LayerProps) -> LayerProps) {
@@ -272,6 +333,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.alphaLock) append(" · 잠금")
             if (p.reference) append(" · 참조")
             if (p.text != null) append(" · 텍스트")
+            if (p.borderWidth > 0f) append(" · 경계")
             if (p.mask) append(if (p.maskEnabled) " · 마스크" else " · 마스크 꺼짐")
             if (p.clip && info.orphanClip) append(" · 클리핑(기준 없음)")
         }

@@ -45,6 +45,9 @@ data class LayerProps(
     val text: TextSpec? = null,
     /** 퀵 마스크 레이어 (알파 = 선택 정도). 끄면 선택 영역으로 바뀌고 사라집니다 */
     val quickMask: Boolean = false,
+    /** 레이어 효과 "경계": 불투명한 부분 둘레에 그리는 테두리 굵기(px, 0 = 끔)와 색. 픽셀은 바꾸지 않고 합성할 때만 */
+    val borderWidth: Float = 0f,
+    val borderColor: Int = 0xFFFFFFFF.toInt(),
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */
