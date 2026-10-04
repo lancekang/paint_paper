@@ -827,6 +827,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         sbBtn(R.drawable.ic_quick_mask, "퀵 마스크", Action.SELECT_QUICK_MASK) { onShortcut(Action.SELECT_QUICK_MASK) }
         sbText("컷", "컷 나누기: 선택 범위로 컷 폴더 만들기 (컷 영역 + 클리핑된 그림 + 테두리)", null) { chooseFrame() }
         sbText("테두리", "선택 범위 테두리 그리기 (주색, 굵기·위치)", null) { chooseSelectionBorder() }
+        sbText("패턴", "선택 영역을 패턴으로 채우기 (점·줄·사선·격자·체크, 주색)", null) { choosePattern() }
         sbText("저장", "선택 영역 저장 (나중에 불러오기)", null) {
             renderer.storeSelection { names -> showHud("${names.last()}(으)로 저장했습니다") }
         }
@@ -1691,6 +1692,50 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             dlg.setOnShowListener { dlg.listView?.setSelection((pos - 3).coerceAtLeast(0)) }
             dlg.show()
         }
+    }
+
+    private var patKind = 0
+    private var patCell = 12
+    private var patWeight = 40
+
+    /** 패턴 채우기: 종류·간격·굵기를 고르고 주색으로 */
+    private fun choosePattern() {
+        val ctx = this
+        val pad = Ui.dp(ctx, 20f)
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
+            minimumWidth = Ui.dp(ctx, 360f)
+        }
+        val kinds = kr.dfluid.paint.engine.SelectionOps.PATTERNS
+        val group = android.widget.RadioGroup(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        kinds.forEachIndexed { i, n ->
+            group.addView(android.widget.RadioButton(ctx).apply {
+                id = 7300 + i
+                text = n
+                setTextColor(Ui.TEXT)
+                isChecked = i == patKind
+            })
+        }
+        group.setOnCheckedChangeListener { _, c -> patKind = c - 7300 }
+        body.addView(android.widget.HorizontalScrollView(ctx).apply { addView(group) })
+        val cell = Ui.SliderRow(ctx, "간격", 62)
+        cell.set(patCell - 2, "${patCell}px")
+        cell.onChange = { p -> patCell = p + 2; cell.set(p, "${patCell}px") }
+        body.addView(cell.view)
+        val weight = Ui.SliderRow(ctx, "굵기", 90)
+        weight.set(patWeight - 5, "$patWeight%")
+        weight.onChange = { p -> patWeight = p + 5; weight.set(p, "$patWeight%") }
+        body.addView(weight.view)
+        Ui.dialog(ctx)
+            .setTitle("패턴 채우기")
+            .setView(body)
+            .setPositiveButton("채우기") { _, _ ->
+                renderer.fillPattern(patKind, patCell, patWeight / 100f, settings.primaryColor)
+                settings.pushRecent(settings.primaryColor)
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private var borderWidthPx = 4

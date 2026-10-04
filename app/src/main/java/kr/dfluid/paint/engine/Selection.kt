@@ -257,6 +257,52 @@ object SelectionOps {
         return out
     }
 
+    /** 패턴 이름 (pattern()의 kind 순서) */
+    val PATTERNS = listOf("점", "가로줄", "세로줄", "사선", "격자", "체크")
+
+    /**
+     * 선택 영역 × 패턴 커버리지. [cell] = 패턴 간격(px), [weight] = 굵기 비율 0..1.
+     * 가장자리는 1px 부드럽게. 경계를 [bounds]에.
+     */
+    fun pattern(mask: ByteArray, w: Int, h: Int, kind: Int, cell: Int, weight: Float, bounds: IntArray): ByteArray {
+        val c = cell.coerceAtLeast(2).toFloat()
+        val half = c / 2f
+        val out = ByteArray(w * h)
+        var l = w; var t = h; var r = -1; var b = -1
+        fun band(d: Float, thick: Float): Float = (thick / 2f - d + 0.5f).coerceIn(0f, 1f)
+        for (y in 0 until h) for (x in 0 until w) {
+            val i = y * w + x
+            val sel = mask[i].toInt() and 0xFF
+            if (sel == 0) continue
+            val fx = x + 0.5f; val fy = y + 0.5f
+            // 칸 안 좌표 (−half..half)
+            val ux = ((fx % c) + c) % c - half
+            val uy = ((fy % c) + c) % c - half
+            val cov = when (kind) {
+                0 -> (weight * half - kotlin.math.hypot(ux, uy) + 0.5f).coerceIn(0f, 1f)
+                1 -> band(kotlin.math.abs(uy), weight * c)
+                2 -> band(kotlin.math.abs(ux), weight * c)
+                3 -> {
+                    // 45° 줄: (x + y) 방향 간격 c
+                    val k = c * 0.7071f
+                    val s = ((fx + fy) * 0.7071f % k + k) % k - k / 2f
+                    band(kotlin.math.abs(s), weight * k)
+                }
+                4 -> maxOf(band(kotlin.math.abs(ux), weight * c), band(kotlin.math.abs(uy), weight * c))
+                else -> if (((kotlin.math.floor(fx / c) + kotlin.math.floor(fy / c)).toInt() and 1) == 0) 1f else 0f
+            }
+            val v = (cov * sel).toInt()
+            if (v <= 0) continue
+            out[i] = v.toByte()
+            if (x < l) l = x
+            if (x > r) r = x
+            if (y < t) t = y
+            if (y > b) b = y
+        }
+        bounds[0] = l; bounds[1] = t; bounds[2] = r; bounds[3] = b
+        return out
+    }
+
     /** 선택 안(>= 128)에서 거리 (px × 3). inside = true면 반대로 선택 밖에서의 거리. */
     private fun distance(mask: ByteArray, w: Int, h: Int, fromOutside: Boolean): IntArray {
         val inf = Int.MAX_VALUE / 2
