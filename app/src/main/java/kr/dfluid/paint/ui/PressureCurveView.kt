@@ -21,6 +21,8 @@ class PressureCurveView(context: Context) : View(context) {
             invalidate()
         }
     var onChanged: ((FloatArray) -> Unit)? = null
+    /** true면 끄는 동안에도 onChanged (톤 커브 미리보기) */
+    var live = false
 
     private val grid = Paint().apply { color = Ui.DIVIDER; strokeWidth = 1f }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -81,7 +83,10 @@ class PressureCurveView(context: Context) : View(context) {
                     dragging = addPoint(vx(e.x), vy(e.y))
                 }
             }
-            MotionEvent.ACTION_MOVE -> if (dragging >= 0) movePoint(dragging, vx(e.x), vy(e.y))
+            MotionEvent.ACTION_MOVE -> if (dragging >= 0) {
+                movePoint(dragging, vx(e.x), vy(e.y))
+                if (live) onChanged?.invoke(points.copyOf())
+            }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (dragging >= 0) onChanged?.invoke(points.copyOf())
                 dragging = -1

@@ -252,7 +252,19 @@ uniform vec4 u_p;
 uniform vec4 u_q;
 uniform vec2 u_dir;
 uniform int u_taps;
+uniform vec4 u_lut[64];
 out vec4 o;
+
+float lutAt(int i) {
+    return u_lut[i / 4][i % 4];
+}
+
+float curve(float x) {
+    float f = clamp(x, 0.0, 1.0) * 255.0;
+    int i = int(floor(f));
+    int j = min(i + 1, 255);
+    return mix(lutAt(i), lutAt(j), f - float(i));
+}
 
 vec3 rgb2hsv(vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -308,6 +320,13 @@ void main() {
     } else if (u_kind == 6) {
         float lum = dot(c, vec3(0.299, 0.587, 0.114));
         c = mix(c, mix(u_p.yzw, u_q.xyz, lum), u_p.x);
+    } else if (u_kind == 7) {
+        // 레벨 보정: 입력 범위 → 감마 → 출력 범위
+        c = clamp((c - u_p.x) / max(u_p.y - u_p.x, 1.0 / 255.0), 0.0, 1.0);
+        c = pow(c, vec3(1.0 / max(u_p.z, 0.01)));
+        c = mix(vec3(u_p.w), vec3(u_q.x), c);
+    } else if (u_kind == 8) {
+        c = vec3(curve(c.r), curve(c.g), curve(c.b));
     }
     o = vec4(clamp(c, 0.0, 1.0) * S.a, S.a);
 }

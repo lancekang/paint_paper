@@ -1806,8 +1806,12 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private fun showFilter(kind: FilterKind) {
         val ctx = this
         val values = IntArray(kind.params.size) { kind.params[it].default }
+        var curvePts = floatArrayOf(0f, 0f, 1f, 1f)
         fun spec(): FilterSpec {
             val v = kind.params.mapIndexed { i, p -> values[i] * p.scale }
+            if (kind == FilterKind.TONE_CURVE) {
+                return FilterSpec(kind, List(8) { 0f } + kr.dfluid.paint.brush.PressureCurve.lut(curvePts, FilterKind.TONE_LUT).toList())
+            }
             if (kind != FilterKind.GRADIENT_MAP) return FilterSpec(kind, v)
             // 그라데이션 맵: 주색(어두운 곳) → 보조색(밝은 곳)
             fun rgb(c: Int) = listOf(Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f)
@@ -1837,7 +1841,19 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 })
             }
         }
-        if (kind.params.isEmpty()) body.addView(Ui.text(ctx, "색을 반전합니다.", 13f))
+        if (kind == FilterKind.INVERT) body.addView(Ui.text(ctx, "색을 반전합니다.", 13f))
+        val curveView = if (kind == FilterKind.TONE_CURVE) PressureCurveView(ctx).also { cv ->
+            cv.points = curvePts
+            cv.live = true
+            cv.onChanged = { pts ->
+                curvePts = pts.copyOf()
+                renderer.setFilter(spec())
+            }
+            body.addView(Ui.text(ctx, "가로 = 원래 밝기, 세로 = 바뀐 밝기. 빈 곳을 누르면 점 추가, 점을 두 번 누르면 삭제", 11.5f, Ui.MUTED))
+            body.addView(cv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = Ui.dp(ctx, 4f)
+            })
+        } else null
         body.addView(Ui.text(ctx, if (renderer.maskEditing) "마스크에 적용합니다." else "선택 영역이 있으면 그 안에만 적용합니다.", 11.5f, Ui.MUTED).apply {
             setPadding(0, Ui.dp(ctx, 6f), 0, 0)
         })
@@ -1850,7 +1866,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 renderer.commitFilter()
             }
             .setNegativeButton("취소", null)
-            .apply { if (kind.params.isNotEmpty()) setNeutralButton("초기화", null) }
+            .apply { if (kind.params.isNotEmpty() || curveView != null) setNeutralButton("초기화", null) }
             .create()
         dlg.setOnDismissListener {
             if (!finished) {
@@ -1866,6 +1882,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                     values[i] = p.default
                     rows[i].set(p.default - p.min, label(i))
                 }
+                curvePts = floatArrayOf(0f, 0f, 1f, 1f)
+                curveView?.points = curvePts
                 renderer.setFilter(spec())
             }
         }

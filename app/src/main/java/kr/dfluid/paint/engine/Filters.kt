@@ -20,6 +20,15 @@ enum class FilterKind(val label: String, val shaderId: Int, val params: List<Fil
         FilterParam("대비", -100, 100, 0, "", 0.01f),
     )),
     INVERT("색 반전", 3, emptyList()),
+    LEVELS("레벨 보정", 7, listOf(
+        FilterParam("입력 검정", 0, 254, 0, "", 1f / 255f),
+        FilterParam("입력 흰색", 1, 255, 255, "", 1f / 255f),
+        FilterParam("감마 (100 = 그대로)", 10, 300, 100, "", 0.01f),
+        FilterParam("출력 검정", 0, 255, 0, "", 1f / 255f),
+        FilterParam("출력 흰색", 0, 255, 255, "", 1f / 255f),
+    )),
+    /** 슬라이더 대신 곡선. FilterSpec.values = 빈 칸 8개 + 256칸 표 ([TONE_LUT]) */
+    TONE_CURVE("톤 커브", 8, emptyList()),
     /** 밝기 → 주색(어두움)~보조색(밝음). 두 색은 FilterSpec.values 뒤에 rgb rgb로 붙입니다. */
     GRADIENT_MAP("그라데이션 맵 (주색 → 보조색)", 6, listOf(FilterParam("강도", 0, 100, 100, "%", 0.01f))),
     POSTERIZE("포스터화", 5, listOf(FilterParam("단계", 2, 32, 4))),
@@ -37,6 +46,9 @@ enum class FilterKind(val label: String, val shaderId: Int, val params: List<Fil
     fun defaultSpec() = FilterSpec(this, params.map { it.default * it.scale })
 
     companion object {
+        /** 톤 커브 표 크기 (셰이더의 u_lut = vec4 × 64) */
+        const val TONE_LUT = 256
+
         /** 흐리기 반지름(px) → 한쪽 탭 수 (≈ 3σ, σ = 반지름 / 2) */
         fun taps(radius: Float): Int = ceil(radius * 1.5f).toInt()
     }

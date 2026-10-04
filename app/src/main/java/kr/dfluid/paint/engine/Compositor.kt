@@ -220,6 +220,8 @@ class Compositor {
         GLES20.glUniform4f(filter.u("u_q"), p.getOrElse(4) { 0f }, p.getOrElse(5) { 0f }, p.getOrElse(6) { 0f }, p.getOrElse(7) { 0f })
         GLES20.glUniform2f(filter.u("u_dir"), dirX, dirY)
         GLES20.glUniform1i(filter.u("u_taps"), taps)
+        // 톤 커브 표 (값 8개 뒤에 붙어 옴)
+        if (p.size >= 8 + 256) GLES20.glUniform4fv(filter.u("u_lut"), 64, p, 8)
         quad.draw()
     }
 
