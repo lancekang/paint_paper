@@ -119,6 +119,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fun onFilterEnded() = Unit
         /** 내비게이터 축소판 (그림이 바뀌면 최대 0.5초마다) */
         fun onNavigator(bitmap: Bitmap) = Unit
+        /** 타임랩스 한 장 (프리멀티플라이드 ARGB, 긴 변 TIMELAPSE_MAX 이하) */
+        fun onTimelapseFrame(bitmap: Bitmap) = Unit
         /** 애니메이션 상태: 폴더가 있는지, 현재 프레임(0부터), 프레임 수 */
         fun onAnimation(exists: Boolean, frame: Int, count: Int) = Unit
     }
@@ -190,6 +192,13 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var navSent = -1L
     private var navTime = 0L
     private var navTarget: RenderTarget? = null
+
+    /** 타임랩스 기록: 그림이 바뀌면(작업이 끝난 뒤) 축소본을 한 장씩 Listener로 보냄 */
+    @Volatile var timelapseOn = false
+    private var tlSent = -1L
+    private var tlTime = 0L
+    private var tlScheduled = false
+    private var tlTarget: RenderTarget? = null
     private var navScheduled = false
 
     /** 톤 효과 결과 버퍼 (캔버스 크기) */
@@ -2284,6 +2293,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         drawScreen(d)
         processThumbnail()
         processNavigator(d)
+        processTimelapse(d)
         if (benchPhase != 0) benchFinish(d, benchStart)
         perf.frameEnd()?.let { s ->
             val mem = memoryLine()
@@ -4134,6 +4144,42 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         main.post { listener.onNavigator(bmp) }
     }
 
+    private fun processTimelapse(d: Document) {
+        if (!timelapseOn || tlSent == version || op != null) return
+        val comp = compResult ?: return
+        val now = SystemClock.uptimeMillis()
+        if (now - tlTime < 300) {
+            if (!tlScheduled) {
+                tlScheduled = true
+                main.postDelayed({ tlScheduled = false; requestRender() }, 320)
+            }
+            return
+        }
+        val s = min(1f, TIMELAPSE_MAX.toFloat() / max(d.width, d.height))
+        val tw = max(2, (d.width * s).roundToInt())
+        val th = max(2, (d.height * s).roundToInt())
+        var t = tlTarget
+        if (t == null || t.width != tw || t.height != th) {
+            t?.release()
+            t = RenderTarget(tw, th)
+            tlTarget = t
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, comp.tex)
+        GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+        comp.setFilter(GLES20.GL_LINEAR_MIPMAP_LINEAR, GLES20.GL_LINEAR)
+        t.bind()
+        GlState.noScissor()
+        GlState.off()
+        compositor.drawCopy(comp.tex, 1f)
+        comp.setFilter(GLES20.GL_NEAREST, GLES20.GL_NEAREST)
+        val buf = t.readAll()
+        val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+        bmp.copyPixelsFromBuffer(buf)
+        tlSent = version
+        tlTime = now
+        main.post { listener.onTimelapseFrame(bmp) }
+    }
+
     private fun processThumbnail() {
         if (op != null || thumbQueue.isEmpty()) return
         val d = doc ?: return
@@ -4314,6 +4360,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     companion object {
+        /** 타임랩스 한 장의 긴 변 (px) */
+        const val TIMELAPSE_MAX = 720
         private const val TAG = "DFPaint"
         private const val THUMB = 96
         /** 내비게이터 축소판 긴 변 (px) */

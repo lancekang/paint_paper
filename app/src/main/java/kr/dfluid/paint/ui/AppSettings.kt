@@ -67,6 +67,8 @@ class AppSettings(context: Context) {
     var navFy = 1f
     /** 선택 범위 런처를 보일지 */
     var selLauncher = true
+    /** 타임랩스 기록 (그리는 과정을 캐시에 한 장씩) */
+    var timelapse = false
     var subUri: String? = null
     var subFx = 0.72f
     var subFy = 0.55f
@@ -148,6 +150,7 @@ class AppSettings(context: Context) {
         animFps = prefs.getInt("animFps", 12)
         subOpen = prefs.getBoolean("subOpen", false)
         selLauncher = prefs.getBoolean("selLauncher", true)
+        timelapse = prefs.getBoolean("timelapse", false)
         navOpen = prefs.getBoolean("navOpen", false)
         quickOpen = prefs.getBoolean("quickOpen", false)
         gridStep = prefs.getInt("gridStep", 0).coerceIn(0, 2000)
@@ -239,6 +242,7 @@ class AppSettings(context: Context) {
             .putInt("animFps", animFps)
             .putBoolean("subOpen", subOpen)
             .putBoolean("selLauncher", selLauncher)
+            .putBoolean("timelapse", timelapse)
             .putBoolean("navOpen", navOpen)
             .putBoolean("quickOpen", quickOpen)
             .putInt("gridStep", gridStep)

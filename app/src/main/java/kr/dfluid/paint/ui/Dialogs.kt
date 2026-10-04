@@ -210,6 +210,15 @@ object Dialogs {
                 onChanged()
             }
         }
+        val timelapse = Switch(ctx).apply {
+            text = "타임랩스 기록 (그리는 과정을 저장해 내보내기 → 타임랩스 MP4)"
+            isChecked = s.timelapse
+            setTextColor(Ui.TEXT)
+            setOnCheckedChangeListener { _, checked ->
+                s.timelapse = checked
+                onChanged()
+            }
+        }
         val hint = Ui.text(
             ctx,
             "제스처: 두 손가락 탭 = 실행취소 · 세 손가락 탭 = 다시실행 · 펜 옆 버튼 = 스포이드 · 펜 뒤쪽(지우개) = 지우개",
@@ -277,6 +286,9 @@ object Dialogs {
             addView(gamma.view)
             addView(finger, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = Ui.dp(ctx, 12f)
+            })
+            addView(timelapse, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = Ui.dp(ctx, 8f)
             })
             addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = Ui.dp(ctx, 12f)

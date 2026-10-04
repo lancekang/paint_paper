@@ -785,6 +785,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
         Ui.setOn(navBtn, settings.navOpen)
         renderer.navigatorOn = settings.navOpen
+        renderer.timelapseOn = settings.timelapse
 
         // ---- 선택 범위 런처 ----
         val sb = LinearLayout(ctx).apply {
@@ -2219,7 +2220,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     private fun showSettings() {
-        Dialogs.settings(this, settings, onChanged = { settings.save() }, onOpenShortcuts = { openShortcutSettings() }, onThemeChanged = { rebuildUi() }, onPanelsChanged = { rebuildUi() })
+        Dialogs.settings(this, settings, onChanged = { settings.save(); renderer.timelapseOn = settings.timelapse }, onOpenShortcuts = { openShortcutSettings() }, onThemeChanged = { rebuildUi() }, onPanelsChanged = { rebuildUi() })
     }
 
     // =====================================================================
@@ -2235,6 +2236,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     private fun newCanvas(w: Int, h: Int, background: Int?) {
+        clearTimelapse()
         currentUri = null
         currentName = null
         settings.lastUri = null
@@ -2278,21 +2280,23 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val png = tips.text("PNG 이미지 (한 장으로 합침)", Action.FILE_EXPORT_PNG)
         val psd = tips.text("PSD (레이어·폴더 유지 · 클립 스튜디오/포토샵)", Action.FILE_EXPORT_PSD)
         val list = arrayListOf(png, psd, "JPEG / 크기 바꿔 내보내기…")
+        val acts = arrayListOf<() -> Unit>({ exportFormat = 0; exportScale = 100; exportPng() }, { exportPsd() }, { chooseImageExport() })
         if (animExists && animCount > 0) {
             list.add("애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)")
+            acts.add { exportGif() }
             list.add("애니메이션 MP4 동영상 (${animCount}프레임 · ${settings.animFps}fps)")
+            acts.add { exportMp4() }
+        }
+        val tl = timelapseFiles().size
+        if (tl > 0) {
+            list.add("타임랩스 MP4 (${tl}장)")
+            acts.add { exportTimelapse() }
+            list.add("타임랩스 기록 지우기")
+            acts.add { Dialogs.confirm(this, "지금까지 기록한 타임랩스 ${tl}장을 지웁니다.", "지우기") { clearTimelapse() } }
         }
         Ui.dialog(this)
             .setTitle("내보내기")
-            .setItems(list.toTypedArray()) { _, which ->
-                when (which) {
-                    0 -> { exportFormat = 0; exportScale = 100; exportPng() }
-                    1 -> exportPsd()
-                    2 -> chooseImageExport()
-                    3 -> exportGif()
-                    else -> exportMp4()
-                }
-            }
+            .setItems(list.toTypedArray()) { _, which -> acts.getOrNull(which)?.invoke() }
             .setNegativeButton("취소", null)
             .show()
     }
@@ -2406,6 +2410,121 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             }
         }
         step(0)
+    }
+
+    // ---- 타임랩스 ----
+
+    private val timelapseDir: java.io.File get() = java.io.File(cacheDir, "timelapse")
+    /** 다음 장 번호 (io 스레드에서만 바꿈) */
+    private var timelapseNext = -1
+    private var timelapseFullShown = false
+
+    private fun timelapseFiles(): List<java.io.File> =
+        timelapseDir.listFiles { f -> f.name.endsWith(".jpg") }?.sortedBy { it.name } ?: emptyList()
+
+    override fun onTimelapseFrame(bitmap: Bitmap) {
+        io.execute {
+            try {
+                val dir = timelapseDir.apply { mkdirs() }
+                if (timelapseNext < 0) timelapseNext = (timelapseFiles().lastOrNull()?.name?.substringBefore('.')?.toIntOrNull() ?: -1) + 1
+                if (timelapseNext >= TIMELAPSE_LIMIT) {
+                    if (!timelapseFullShown) {
+                        timelapseFullShown = true
+                        ui.post { showHud("타임랩스가 ${TIMELAPSE_LIMIT}장을 넘어 기록을 멈췄습니다") }
+                    }
+                    return@execute
+                }
+                // 투명한 곳은 흰 바탕으로
+                val out = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+                android.graphics.Canvas(out).apply {
+                    drawColor(Color.WHITE)
+                    drawBitmap(bitmap, 0f, 0f, null)
+                }
+                java.io.File(dir, String.format(java.util.Locale.ROOT, "%06d.jpg", timelapseNext)).outputStream().use {
+                    out.compress(Bitmap.CompressFormat.JPEG, 85, it)
+                }
+                out.recycle()
+                timelapseNext++
+            } catch (e: Exception) {
+                Log.w(TAG, "timelapse frame failed", e)
+            } finally {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    private fun clearTimelapse() {
+        io.execute {
+            timelapseFiles().forEach { it.delete() }
+            timelapseNext = 0
+            timelapseFullShown = false
+        }
+    }
+
+    private fun exportTimelapse() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_TITLE, (currentUri?.let { displayName(it)?.substringBeforeLast('.') } ?: "그림") + " 타임랩스.mp4")
+        }
+        startActivityForResult(intent, REQ_EXPORT_TIMELAPSE)
+    }
+
+    /** 기록한 장들을 30fps로 (마지막 장은 2초 멈춤). 크기는 마지막 장 기준, 다른 크기는 흰 바탕에 맞춰 넣음 */
+    private fun writeTimelapse(uri: Uri) {
+        showHud("타임랩스를 만드는 중…")
+        io.execute {
+            val files = timelapseFiles()
+            if (files.isEmpty()) return@execute
+            var encoder: kr.dfluid.paint.document.Mp4Encoder? = null
+            val pfd = try {
+                contentResolver.openFileDescriptor(uri, "rwt") ?: throw IllegalStateException("파일을 열 수 없습니다.")
+            } catch (e: Exception) {
+                ui.post { Toast.makeText(this, "타임랩스를 내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show() }
+                return@execute
+            }
+            try {
+                val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(files.last().path, opts)
+                val vw = maxOf(2, opts.outWidth / 2 * 2)
+                val vh = maxOf(2, opts.outHeight / 2 * 2)
+                val fps = 30
+                val enc = kr.dfluid.paint.document.Mp4Encoder(pfd.fileDescriptor, vw, vh, fps).also { encoder = it }
+                val frame = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(frame)
+                val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+                val px = IntArray(vw * vh)
+                fun put(f: java.io.File) {
+                    val b = android.graphics.BitmapFactory.decodeFile(f.path) ?: return
+                    canvas.drawColor(Color.WHITE)
+                    // 비율을 지켜 가운데에
+                    val k = minOf(vw.toFloat() / b.width, vh.toFloat() / b.height)
+                    val w = b.width * k; val h = b.height * k
+                    canvas.drawBitmap(b, null, android.graphics.RectF((vw - w) / 2f, (vh - h) / 2f, (vw + w) / 2f, (vh + h) / 2f), paint)
+                    b.recycle()
+                    frame.getPixels(px, 0, vw, 0, 0, vw, vh)
+                    enc.addFrame(px)
+                }
+                files.forEachIndexed { i, f ->
+                    put(f)
+                    if (i % 60 == 0) ui.post { showHud("타임랩스를 만드는 중… ${i + 1} / ${files.size}") }
+                }
+                // 완성본을 2초 보여 줌
+                repeat(fps * 2 - 1) {
+                    frame.getPixels(px, 0, vw, 0, 0, vw, vh)
+                    enc.addFrame(px)
+                }
+                frame.recycle()
+                enc.finish()
+                pfd.close()
+                ui.post { showHud("타임랩스를 내보냈습니다 (${files.size}장 · ${vw}×$vh)") }
+            } catch (e: Throwable) {
+                Log.e(TAG, "timelapse export failed", e)
+                encoder?.abort()
+                try { pfd.close() } catch (_: Exception) {}
+                ui.post { Toast.makeText(this, "타임랩스를 내보내지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show() }
+            }
+        }
     }
 
     private fun exportMp4() {
@@ -2589,6 +2708,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             REQ_EXPORT_PSD -> writePsd(uri)
             REQ_EXPORT_GIF -> writeGif(uri)
             REQ_EXPORT_MP4 -> writeMp4(uri)
+            REQ_EXPORT_TIMELAPSE -> writeTimelapse(uri)
             REQ_IMPORT_LAYER -> readImageLayer(uri)
             REQ_BRUSH_EXPORT -> {
                 val b = pendingBrushExport ?: return
@@ -2688,6 +2808,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 }
                 ui.post {
                     renderer.loadDocument(doc) { version ->
+                        // 다른 그림을 열면 타임랩스를 새로
+                        clearTimelapse()
                         currentUri = if (isZip) uri else null
                         currentName = null
                         settings.lastUri = currentUri?.toString()
@@ -2886,6 +3008,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_EXPORT_MP4 = 20
         /** MP4 긴 변 최대 크기 (px) */
         private const val MP4_MAX = 1280
+        private const val REQ_EXPORT_TIMELAPSE = 21
+        /** 타임랩스 기록 최대 장수 (넘으면 기록을 멈춤) */
+        private const val TIMELAPSE_LIMIT = 6000
         /** 자동 저장 기록 개수 */
         private const val AUTOSAVE_KEEP = 5
         /** GIF 긴 변 최대 크기 (px) */
