@@ -688,15 +688,31 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 복사한 픽셀을 활성 레이어 위 새 레이어로 (복사했던 자리에). 실행취소 한 단계. */
     fun paste() = post {
         finishOp()
-        val d = doc ?: return@post
         val c = clip ?: run {
             reportError("붙여넣을 것이 없습니다. 먼저 복사하세요.")
             return@post
         }
+        pasteClip(c, "붙여넣기")
+    }
+
+    /**
+     * 이미지(프리멀티플라이드 RGBA, w×h)를 캔버스 가운데 새 레이어로 넣고 바로 자유 변형을 시작합니다.
+     * 크기·위치를 맞춘 뒤 확정하면 됩니다.
+     */
+    fun importImage(w: Int, h: Int, pixels: ByteBuffer, name: String) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val c = Clip((d.width - w) / 2, (d.height - h) / 2, w, h, pixels)
+        if (pasteClip(c, name)) beginTransformGl()
+    }
+
+    /** [c]를 활성 노드 위 새 레이어로. 넣었으면 true */
+    private fun pasteClip(c: Clip, name: String): Boolean {
+        val d = doc ?: return false
         // 캔버스 크기가 바뀌었으면 넘치는 부분은 잘림
         val tiles = HashMap<Int, ByteBuffer>()
         val cols = TileMath.cols(d.width)
-        val r = IRect(c.x, c.y, c.w, c.h).intersect(IRect(0, 0, d.width, d.height)) ?: return@post
+        val r = IRect(c.x, c.y, c.w, c.h).intersect(IRect(0, 0, d.width, d.height)) ?: return false
         val tx0 = r.x / TILE; val ty0 = r.y / TILE
         val tx1 = (r.right - 1) / TILE; val ty1 = (r.bottom - 1) / TILE
         val row = ByteArray(TILE * 4)
@@ -721,20 +737,21 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             buf.rewind()
             if (any && !TileMath.isEmpty(buf)) tiles[ty * cols + tx] = buf
         }
-        if (tiles.isEmpty()) return@post
+        if (tiles.isEmpty()) return false
         structural { doc ->
             val a = doc.active
             val parent = a?.parent ?: doc.root
             val idx = if (a != null) a.index + 1 else parent.children.size
-            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps("붙여넣기"))
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(name))
             insert(parent, idx, n)
             n.id
         }
-        val s = surfaces[d.activeId] ?: return@post
+        val s = surfaces[d.activeId] ?: return false
         if (s.tileCount == 0) tiles.forEach { (k, b) -> s.write(k, b) }
         thumbQueue.add(d.activeId)
         belowValid = false
         markAllDirty()
+        return true
     }
 
     // =====================================================================
@@ -1938,10 +1955,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         // 실행취소 기록을 유지하면 지운 레이어(parked)의 선도 남겨 둠
         if (!keepHistory) vectors.clear()
         for (n in data.nodes) n.vector?.let { vectors[n.id] = it }
-        animFrame = 0
-        animPlaying = false
         d.rebuild(data.nodes.map { ShapeEntry(it.id, it.kind, it.props, it.parentId) })
         d.activeId = if (d.find(data.activeId) != null) data.activeId else d.allNodes().firstOrNull { it.isRaster }?.id ?: 0
+        // 활성 레이어가 애니메이션 셀이면 그 프레임을 보여 줌
+        animFrame = d.active?.takeIf { it.parent?.props?.animation == true }?.index ?: 0
+        animPlaying = false
         strokeBuf = sb; selTex = sel; preview = pv; belowCache = below
         pairs.add(PingPong(ca, cb))
         tileTmp = tt; thumbTarget = th
@@ -3446,6 +3464,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         d.rebuild(shape)
         d.activeId = if (d.find(activeId) != null) activeId else d.allNodes().firstOrNull { it.isRaster }?.id ?: 0
+        // 활성 레이어가 애니메이션 셀이면 그 프레임을 보여 줌 (새 셀·실행취소 뒤에도 보이는 셀에 그리도록)
+        d.active?.takeIf { it.parent?.props?.animation == true }?.let { animFrame = it.index }
         belowValid = false
         markAllDirty()
     }

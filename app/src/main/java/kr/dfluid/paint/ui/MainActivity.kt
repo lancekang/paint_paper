@@ -441,7 +441,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         act(R.drawable.ic_file_new, "새 캔버스", Action.FILE_NEW)
         act(R.drawable.ic_file_open, "열기", Action.FILE_OPEN)
         act(R.drawable.ic_file_save, "저장", Action.FILE_SAVE)
-        barBtn(R.drawable.ic_file_export, "내보내기 (PNG · PSD)") { chooseExport() }
+        barBtn(R.drawable.ic_image_add, "이미지를 레이어로 가져오기 (가져온 뒤 크기·위치 맞추기)") { importImageLayer() }
+        barBtn(R.drawable.ic_file_export, "내보내기 (PNG · JPEG · PSD · GIF)") { chooseExport() }
         group("편집")
         undoBtn = barBtn(R.drawable.ic_undo, "실행취소", Action.UNDO) { renderer.undo() }
         redoBtn = barBtn(R.drawable.ic_redo, "다시실행", Action.REDO) { renderer.redo() }
@@ -1359,6 +1360,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onTransformStarted(width: Int, height: Int, matrix: FloatArray) {
         transforming = true
         updateSelBar()
+        onAnimation(animExists, animFrame, animCount)
         distortBtnRef?.let { Ui.setOn(it, false) }
         overlay.startTransform(width, height, matrix)
         if (moveSession && (pendingMoveX != 0f || pendingMoveY != 0f)) overlay.translateBy(pendingMoveX, pendingMoveY)
@@ -1375,6 +1377,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onTransformEnded() {
         transforming = false
         updateSelBar()
+        onAnimation(animExists, animFrame, animCount)
         moveSession = false
         commitWhenStarted = false
         overlay.endTransform()
@@ -1886,6 +1889,50 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             .show()
     }
 
+    private fun importImageLayer() {
+        if (transforming) commitTransform()
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        startActivityForResult(intent, REQ_IMPORT_LAYER)
+    }
+
+    /** 캔버스보다 크면 캔버스에 맞게 줄여서 새 레이어로 */
+    private fun readImageLayer(uri: Uri) {
+        val cw = canvasView.viewport.canvasW.toInt()
+        val ch = canvasView.viewport.canvasH.toInt()
+        val name = displayName(uri)?.substringBeforeLast('.') ?: "가져온 이미지"
+        showHud("이미지를 가져오는 중…")
+        io.execute {
+            try {
+                var bmp = RefImageView.load(this, uri, maxOf(cw, ch) * 2) ?: throw IllegalStateException("이미지를 읽을 수 없습니다.")
+                val s = minOf(1f, cw.toFloat() / bmp.width, ch.toFloat() / bmp.height)
+                if (s < 1f) {
+                    val sc = android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * s).toInt()), maxOf(1, (bmp.height * s).toInt()), true)
+                    if (sc !== bmp) bmp.recycle()
+                    bmp = sc
+                }
+                if (bmp.config != android.graphics.Bitmap.Config.ARGB_8888) {
+                    val c = bmp.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    bmp.recycle()
+                    bmp = c
+                }
+                // Bitmap 메모리는 프리멀티플라이드 RGBA 순서라 그대로 씁니다.
+                val buf = java.nio.ByteBuffer.allocateDirect(bmp.width * bmp.height * 4).order(java.nio.ByteOrder.nativeOrder())
+                bmp.copyPixelsToBuffer(buf)
+                buf.rewind()
+                val w = bmp.width; val h = bmp.height
+                bmp.recycle()
+                ui.post { renderer.importImage(w, h, buf, name) }
+            } catch (e: OutOfMemoryError) {
+                ui.post { Toast.makeText(this, "메모리가 부족해 이미지를 가져오지 못했습니다.", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                ui.post { Toast.makeText(this, "이미지를 가져오지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+
     private fun exportGif() {
         stopPlayback()
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -2064,6 +2111,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             REQ_EXPORT -> writePng(uri)
             REQ_EXPORT_PSD -> writePsd(uri)
             REQ_EXPORT_GIF -> writeGif(uri)
+            REQ_IMPORT_LAYER -> readImageLayer(uri)
             REQ_SUB_IMAGE -> {
                 try {
                     contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -2264,6 +2312,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_EXPORT_PSD = 14
         private const val REQ_EXPORT_GIF = 15
         private const val REQ_SUB_IMAGE = 16
+        private const val REQ_IMPORT_LAYER = 17
         /** GIF 긴 변 최대 크기 (px) */
         private const val GIF_MAX = 800
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"
