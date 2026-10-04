@@ -23,6 +23,12 @@ enum class SymMode(val label: String) {
 class Symmetry {
     var mode = SymMode.OFF
     var radialCount = 6
+    /** 대칭 중심 (캔버스 px). 음수면 캔버스 가운데. 손잡이로 옮길 수 있음 */
+    var cx = -1f
+    var cy = -1f
+
+    fun centerX(canvasW: Float) = if (cx < 0f) canvasW / 2f else cx
+    fun centerY(canvasH: Float) = if (cy < 0f) canvasH / 2f else cy
 
     val on: Boolean get() = mode != SymMode.OFF
 

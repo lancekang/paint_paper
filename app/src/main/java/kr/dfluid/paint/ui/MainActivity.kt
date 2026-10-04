@@ -210,6 +210,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         canvasView = CanvasView(this, renderer)
         canvasView.host = this
         overlay = OverlayView(this, canvasView.viewport)
+        overlay.symmetry = symmetry
         overlay.listener = this
         overlay.stylusSeen = { canvasView.stylusSeen }
         overlay.ruler = ruler
@@ -1086,6 +1087,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     private fun cycleSymmetry() {
         symmetry.mode = symmetry.mode.next()
+        // 끌 때 중심을 가운데로 되돌림
+        if (!symmetry.on) { symmetry.cx = -1f; symmetry.cy = -1f }
         overlay.showSymmetry(symmetry.mode, symmetry.radialCount)
         updateSymmetryButton()
     }

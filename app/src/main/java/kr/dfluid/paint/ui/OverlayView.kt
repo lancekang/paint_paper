@@ -471,7 +471,14 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         if (gridStep > 0) drawGrid(canvas)
         layoutGuideX?.let { canvas.drawLine(it, 0f, it, height.toFloat(), layoutGuide) }
         layoutGuideY?.let { canvas.drawLine(0f, it, width.toFloat(), it, layoutGuide) }
-        if (symMode != SymMode.OFF) drawSymmetry(canvas)
+        if (symMode != SymMode.OFF) {
+            drawSymmetry(canvas)
+            // 중심 손잡이 (끌어서 옮김)
+            val a = FloatArray(2)
+            viewport.toScreen(symmetry?.centerX(viewport.canvasW) ?: (viewport.canvasW / 2f), symmetry?.centerY(viewport.canvasH) ?: (viewport.canvasH / 2f), a)
+            canvas.drawCircle(a[0], a[1], handleR * 1.2f, handleFill)
+            canvas.drawCircle(a[0], a[1], handleR * 1.2f, handleStroke)
+        }
         ruler?.takeIf { it.on }?.let { drawRuler(canvas, it) }
         selShape?.let { drawSelectionGuide(canvas, it) }
         gradient?.let { g ->
@@ -561,11 +568,15 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         }
     }
 
+    /** 대칭 중심을 읽을 곳 (MainActivity가 연결) */
+    var symmetry: kr.dfluid.paint.input.Symmetry? = null
+
     private fun drawSymmetry(canvas: Canvas) {
         val w = viewport.canvasW
         val h = viewport.canvasH
-        val cx = w / 2f
-        val cy = h / 2f
+        val cx = symmetry?.centerX(w) ?: (w / 2f)
+        val cy = symmetry?.centerY(h) ?: (h / 2f)
+        val far = hypot(w, h) * 2f
         fun line(x0: Float, y0: Float, x1: Float, y1: Float) {
             val a = FloatArray(2); val b = FloatArray(2)
             viewport.toScreen(x0, y0, a)
@@ -578,7 +589,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
             SymMode.HORIZONTAL -> line(0f, cy, w, cy)
             SymMode.QUAD -> { line(cx, 0f, cx, h); line(0f, cy, w, cy) }
             SymMode.RADIAL -> {
-                val r = hypot(w, h) / 2f
+                val r = far
                 val cnt = symCount.coerceIn(2, 16)
                 for (k in 0 until cnt) {
                     val ang = (2.0 * Math.PI * k / cnt).toFloat()

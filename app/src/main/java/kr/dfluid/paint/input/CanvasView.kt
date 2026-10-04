@@ -104,6 +104,15 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     private val rp = FloatArray(2)
     private val density = context.resources.displayMetrics.density
 
+    /** 대칭 중심 손잡이 위인지 (대칭이 켜져 있을 때) */
+    private fun symHandleAt(x: Float, y: Float, h: Host): Boolean {
+        val s = h.symmetry
+        if (!s.on) return false
+        val p = FloatArray(2)
+        viewport.toScreen(s.centerX(viewport.canvasW), s.centerY(viewport.canvasH), p)
+        return hypot(p[0] - x, p[1] - y) < 26f * density
+    }
+
     /** 화면 좌표 (x,y) 가까이에 있는 자 손잡이 번호 (없으면 -1) */
     private fun rulerHandleAt(x: Float, y: Float, h: Host): Int {
         if (!h.ruler.on) return -1
@@ -361,6 +370,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             h.holdMode == HoldMode.ZOOM -> Mode.DRAG_ZOOM
             // 변형 중에는 상자 밖을 눌러도 그리거나 선택하지 않습니다.
             h.transformActive && tool != Tool.MOVE -> Mode.IGNORE
+            // 대칭 중심 손잡이
+            symHandleAt(x, y, h) -> {
+                rulerHandle = SYM_HANDLE
+                Mode.RULER
+            }
             // 자 손잡이 위에서 시작하면 그리지 않고 손잡이를 옮깁니다.
             rulerHandleAt(x, y, h).also { rulerHandle = it } >= 0 -> Mode.RULER
             // 선택 도구에서 Alt는 "빼기"라서 스포이드로 바꾸지 않습니다.
@@ -443,8 +457,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         renderer.addStamps(stamps)
         val sym = h.symmetry
         if (sym.on) {
-            val cx = viewport.canvasW / 2f
-            val cy = viewport.canvasH / 2f
+            val cx = sym.centerX(viewport.canvasW)
+            val cy = sym.centerY(viewport.canvasH)
             sym.mirror(stamps, cx, cy).forEachIndexed { i, m -> renderer.addStamps(m, i + 1) }
         }
     }
@@ -471,7 +485,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
 
     /** 스트로크 버퍼 전체를 [base] (+ 대칭 복제본)로 바꿉니다. */
     private fun replaceStroke(base: FloatArray, h: Host) {
-        val mirrors = if (h.symmetry.on) h.symmetry.mirror(base, viewport.canvasW / 2f, viewport.canvasH / 2f) else emptyList()
+        val mirrors = if (h.symmetry.on) h.symmetry.mirror(base, h.symmetry.centerX(viewport.canvasW), h.symmetry.centerY(viewport.canvasH)) else emptyList()
         if (mirrors.isEmpty()) {
             renderer.setStrokeLine(base)
         } else {
@@ -556,7 +570,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 stamps = taper.renderAll()
             }
         }
-        val mirrors = if (h.symmetry.on) h.symmetry.mirror(stamps, viewport.canvasW / 2f, viewport.canvasH / 2f) else emptyList()
+        val mirrors = if (h.symmetry.on) h.symmetry.mirror(stamps, h.symmetry.centerX(viewport.canvasW), h.symmetry.centerY(viewport.canvasH)) else emptyList()
         var combined = stamps
         if (mirrors.isNotEmpty()) {
             combined = FloatArray(stamps.size + mirrors.sumOf { it.size })
@@ -638,7 +652,12 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             }
             Mode.RULER -> {
                 val i = e.findPointerIndex(primaryId)
-                if (i >= 0 && rulerHandle >= 0) {
+                if (i >= 0 && rulerHandle == SYM_HANDLE) {
+                    viewport.toCanvas(e.getX(i), e.getY(i), tmp)
+                    h.symmetry.cx = tmp[0].coerceIn(0f, viewport.canvasW)
+                    h.symmetry.cy = tmp[1].coerceIn(0f, viewport.canvasH)
+                    h.onRulerChanged()
+                } else if (i >= 0 && rulerHandle >= 0) {
                     viewport.toCanvas(e.getX(i), e.getY(i), tmp)
                     h.ruler.moveHandle(rulerHandle, tmp[0], tmp[1])
                     h.onRulerChanged()
@@ -894,6 +913,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     companion object {
         /** 자 방향을 정하기 위해 움직여야 하는 거리 (화면 dp) */
         const val RULER_DECIDE_DP = 10f
+        /** rulerHandle 값: 대칭 중심 */
+        private const val SYM_HANDLE = 1000
         private const val TAP_MS = 280L
         private const val TAP_SLOP = 24f
     }
