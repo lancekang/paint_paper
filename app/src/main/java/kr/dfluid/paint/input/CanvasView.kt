@@ -343,6 +343,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     private fun penBusy() = mode != Mode.NONE && mode != Mode.IGNORE && mode != Mode.GESTURE && primaryId >= 0
 
     private fun startPrimary(e: MotionEvent, i: Int, pen: Boolean, h: Host) {
+        // 취소된 이전 올가미의 표시가 남지 않게 매번 새로 정함
+        fillLasso = false
         primaryId = e.getPointerId(i)
         primaryIsPen = pen
         val x = e.getX(i)

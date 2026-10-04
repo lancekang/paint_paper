@@ -162,6 +162,12 @@ object FloodFill {
         if (gap > 0) {
             val grown = dilate(region, bw, bh, gap)
             for (i in 0 until n) if (rawWalls[i].toInt() != 0 && region[i].toInt() == 0) grown[i] = 0
+            // 올가미 밖이나 밖과 이어진 칸으로는 넘치지 않게 (선 픽셀 위로만 자람)
+            for (y in 0 until bh) for (x in 0 until bw) {
+                val i = y * bw + x
+                if (grown[i].toInt() != 0 && region[i].toInt() == 0 &&
+                    (lasso[(by0 + y) * w + bx0 + x].toInt() == 0 || reach[i].toInt() != 0)) grown[i] = 0
+            }
             region = grown
         }
         if (expand > 0) region = dilate(region, bw, bh, expand)

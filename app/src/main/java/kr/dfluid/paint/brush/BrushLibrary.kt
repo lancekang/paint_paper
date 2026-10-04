@@ -82,6 +82,9 @@ class BrushLibrary(context: Context) {
     private val activeId = HashMap<Tool, String>()
     private val tipCache = HashMap<String, TipImage>()
 
+    /** 저장본 판 (기본 보조 도구를 나중에 추가할 때 한 번만 넣으려고). init보다 먼저 선언해야 load()가 바꾼 값이 남음 */
+    private var rev = 0
+
     init {
         load()
     }
@@ -166,8 +169,6 @@ class BrushLibrary(context: Context) {
         }
     }
 
-    /** 저장본 판 (기본 보조 도구를 나중에 추가할 때 한 번만 넣으려고) */
-    private var rev = 0
 
     fun save() {
         val arr = JSONArray()

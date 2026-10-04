@@ -2039,6 +2039,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         topBar.visibility = vis
         toolBar.visibility = vis
         rightPanel.visibility = vis
+        // 떠 있는 창들도 함께 (다시 보일 때는 열려 있던 것만)
+        if (::quickPanel.isInitialized) quickPanel.visibility = if (uiVisible && settings.quickOpen) View.VISIBLE else View.GONE
+        if (::navPanel.isInitialized) navPanel.visibility = if (uiVisible && settings.navOpen) View.VISIBLE else View.GONE
+        if (::subPanel.isInitialized) subPanel.visibility = if (uiVisible && settings.subOpen) View.VISIBLE else View.GONE
     }
 
     private fun openShortcutSettings() {
@@ -2242,7 +2246,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     private fun writePsd(uri: Uri) {
         showHud("PSD로 내보내는 중…")
-        renderer.captureDocument { data, composite, _ ->
+        renderer.captureForExport { data, composite ->
             io.execute {
                 try {
                     contentResolver.openOutputStream(uri, "wt")?.use { PsdIO.write(it, data, composite) }

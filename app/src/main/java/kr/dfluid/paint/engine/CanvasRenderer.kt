@@ -1049,7 +1049,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         var areaId = 0
         var lineId = 0
         structural { doc ->
-            val a = doc.active
+            // 애니메이션 폴더 안이면 프레임이 되지 않게 폴더 옆에 둠
+            var a = doc.active
+            if (a?.parent?.props?.animation == true) a = a.parent
             val parent = a?.parent ?: doc.root
             val idx = if (a != null) a.index + 1 else parent.children.size
             val names = doc.allNodes().map { it.props.name }.toSet()
@@ -1756,6 +1758,21 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     /** 저장용 스냅샷. 콜백은 GL 스레드에서 불리므로 무거운 작업은 다른 스레드로 넘기세요. */
+    /** 내보내기(PSD)용: 밑그림 레이어(와 그 안의 것)를 뺀 문서 + 밑그림 뺀 합성 결과 */
+    fun captureForExport(callback: (DocumentData, ByteBuffer) -> Unit) = post {
+        finishOp()
+        val d = doc ?: return@post
+        try {
+            val data = captureData(d)
+            val drop = HashSet<Int>()
+            for (n in data.nodes) if (n.props.draft || n.parentId in drop) drop.add(n.id)
+            val kept = if (drop.isEmpty()) data else DocumentData(data.width, data.height, data.activeId, data.nodes.filter { it.id !in drop })
+            callback(kept, cleanComposite(d))
+        } catch (e: OutOfMemoryError) {
+            main.post { listener.onRendererError("메모리가 부족해 내보낼 수 없습니다.") }
+        }
+    }
+
     fun captureDocument(callback: (DocumentData, ByteBuffer, Long) -> Unit) = post {
         finishOp()
         val d = doc ?: return@post
@@ -3595,7 +3612,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (!navigatorOn || navSent == version) return
         val comp = compResult ?: return
         val now = SystemClock.uptimeMillis()
-        if (op != null || now - navTime < 500) {
+        if (op != null) return // 작업이 끝나면 다시 그리면서 불림
+        if (now - navTime < 500) {
             if (!navScheduled) {
                 navScheduled = true
                 main.postDelayed({ navScheduled = false; requestRender() }, 520)
