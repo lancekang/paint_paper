@@ -145,6 +145,8 @@ const icons = {
 
   // ---- 성능 ----
   gauge: ['M12,14l4,-4', 'M3.34,19a10,10 0 1,1 17.32,0'],
+  // 필터·색조 보정: 조절 슬라이더 세 줄
+  adjust: ['M4,6h4M12,6h8M4,12h10M18,12h2M4,18h2M10,18h10', circle(10, 6, 2), circle(16, 12, 2), circle(8, 18, 2)],
 };
 
 const norm = (e) => (typeof e === 'string' ? { d: e } : e);

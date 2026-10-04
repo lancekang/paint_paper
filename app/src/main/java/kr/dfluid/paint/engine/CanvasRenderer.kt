@@ -78,6 +78,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         fun onPerfStats(stats: PerfMonitor.Stats, memory: String) = Unit
         /** 합성 벤치마크 결과 (여러 줄 문자열) */
         fun onBenchmarkDone(report: String) = Unit
+        /** 필터 미리보기가 끝남 (적용·취소·시작 실패 모두) */
+        fun onFilterEnded() = Unit
     }
 
     /** CanvasView가 설정합니다. */
@@ -174,6 +176,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 val dx = (mb.x - bounds.x).toFloat()
                 val dy = (mb.y - bounds.y).toFloat()
                 return floatArrayOf(m[0], m[1], m[2], m[3], m[4] + m[0] * dx + m[2] * dy, m[5] + m[1] * dx + m[3] * dy)
+            }
+        }
+
+        /**
+         * 필터 미리보기. [bounds] 크기 버퍼 3장: orig = 원본, work·result = 중간·결과.
+         * 값이 바뀌면 stale만 표시하고, 다음 합성 때 한 번만 다시 계산합니다 (슬라이더 이벤트가 몰려도).
+         */
+        class Filter(var spec: FilterSpec, val bounds: IRect, val target: Int, val orig: RenderTarget, val work: RenderTarget, val result: RenderTarget) : Op() {
+            var stale = true
+
+            fun release() {
+                orig.release(); work.release(); result.release()
             }
         }
     }
@@ -299,9 +313,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         o.rect?.let { markDirty(it) }
     }
 
-    /** 변형/그라데이션 중의 실행취소는 그 작업만 취소합니다. */
+    /** 변형/그라데이션/필터 중의 실행취소는 그 작업만 취소합니다. */
     fun undo() = post {
-        if (op is Op.Transform || op is Op.Gradient) {
+        if (op is Op.Transform || op is Op.Gradient || op is Op.Filter) {
             cancelPreviewOps(); return@post
         }
         finishOp()
@@ -309,7 +323,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     fun redo() = post {
-        if (op is Op.Transform || op is Op.Gradient) {
+        if (op is Op.Transform || op is Op.Gradient || op is Op.Filter) {
             cancelPreviewOps(); return@post
         }
         finishOp()
@@ -461,6 +475,29 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             markAllDirty()
         }
     }
+
+    // =====================================================================
+    // UI 스레드 API — 필터 · 색조 보정
+    // =====================================================================
+
+    /**
+     * 활성 레이어(마스크 편집 중이면 마스크)에 필터 미리보기를 시작합니다.
+     * 선택 영역이 있으면 그 안만. 값은 [setFilter]로 바꾸고 [commitFilter]/[cancelFilter]로 끝냅니다.
+     */
+    fun beginFilter(spec: FilterSpec) = post {
+        if (!beginFilterGl(spec)) main.post { listener.onFilterEnded() }
+    }
+
+    fun setFilter(spec: FilterSpec) = post {
+        val o = op as? Op.Filter ?: return@post
+        o.spec = spec
+        o.stale = true
+        markDirty(o.bounds)
+    }
+
+    fun commitFilter() = post { if (op is Op.Filter) finishOp() }
+
+    fun cancelFilter() = post { (op as? Op.Filter)?.let { endFilter(it) } }
 
     // =====================================================================
     // UI 스레드 API — 선택 영역
@@ -1009,6 +1046,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         pairs.forEach { add(it.a); add(it.b) }
+        (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
             "GPU %.0fMB (레이어 타일 %.0fMB · 작업 버퍼 %.0fMB, 합성 깊이 %d) · 실행취소 %.0fMB",
             (tiles + buffers) / mb, tiles / mb, buffers / mb, pairs.size, history.totalBytes / mb
@@ -1261,6 +1299,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         pairs.forEach { it.release() }
         pairs.clear()
         (op as? Op.Transform)?.floating?.release()
+        (op as? Op.Filter)?.let {
+            it.release()
+            main.post { listener.onFilterEnded() }
+        }
         op = null
         doc = null
         strokeBuf = null; selTex = null; preview = null; belowCache = null; compResult = null
@@ -1277,6 +1319,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         strokeBuf = null; selTex = null; preview = null; belowCache = null; compResult = null
         tileTmp = null; thumbTarget = null
         maskTmp = null
+        if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
     }
@@ -1340,17 +1383,19 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 }
             }
             is Op.Transform -> commitTransformGl(o, d)
+            is Op.Filter -> commitFilterGl(o, d)
             null -> Unit
         }
     }
 
-    /** 미리보기만 있는 작업(그라데이션/변형)은 취소, 획은 확정. 실행취소 전에 부릅니다. */
+    /** 미리보기만 있는 작업(그라데이션/변형/필터)은 취소, 획은 확정. 실행취소 전에 부릅니다. */
     private fun cancelPreviewOps() {
         when (val o = op) {
             is Op.Gradient -> {
                 op = null; markAllDirty()
             }
             is Op.Transform -> endTransform(o)
+            is Op.Filter -> endFilter(o)
             is Op.Stroke -> finishOp()
             null -> Unit
         }
@@ -1602,6 +1647,119 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         op = null
         markAllDirty()
         main.post { listener.onTransformEnded() }
+    }
+
+    // ---- 필터 ----
+
+    /** 미리보기 버퍼를 만들고 원본을 담습니다. 시작하지 못하면 false (안내는 여기서). */
+    private fun beginFilterGl(spec: FilterSpec): Boolean {
+        val d = doc ?: return false
+        val n = editableActive() ?: return false
+        finishOp()
+        if (isMaskEdit(n) && !spec.kind.forMask) {
+            reportError("마스크에는 흐리기만 쓸 수 있습니다.")
+            return false
+        }
+        val target = editId(n)
+        val s = surfaces[target] ?: return false
+        val pad = spec.kind.pad
+        fun grow(r: IRect) = IRect.ofBounds(
+            (r.x - pad).toFloat(), (r.y - pad).toFloat(), (r.right + pad).toFloat(), (r.bottom + pad).toFloat(), d.width, d.height
+        )
+        val content = s.tileBounds()?.let { grow(it) }
+        val b = if (content != null && hasSelection) selBounds?.let { grow(it) }?.let { content.intersect(it) } else content
+        if (b == null) {
+            reportError(if (hasSelection) "선택 영역 안에 필터를 적용할 픽셀이 없습니다." else "필터를 적용할 픽셀이 없습니다.")
+            return false
+        }
+        val made = ArrayList<RenderTarget>(3)
+        try {
+            repeat(3) { made.add(RenderTarget(b.w, b.h)) }
+        } catch (e: OutOfMemoryError) {
+            made.forEach { it.release() }
+            reportError("메모리가 부족해 필터를 쓸 수 없습니다. 선택 영역을 좁혀 보세요.")
+            return false
+        }
+        val orig = made[0]
+        // 원본 = 레이어 픽셀 (뷰포트를 밀어 캔버스 좌표계로 그림)
+        GlState.bindFbo(orig.fbo)
+        GLES20.glViewport(-b.x, -b.y, d.width, d.height)
+        GlState.off()
+        GlState.noScissor()
+        for ((key, t) in s.tiles) {
+            if (!s.tileRect(key).intersects(b)) continue
+            compositor.drawTile(t.tex, s.originX(key), s.originY(key), d.width, d.height, 1f)
+        }
+        // 흐리기는 두 탭을 선형 보간으로 한 번에 읽습니다. 픽셀 중심만 읽는 곳에서는 결과가 같습니다.
+        made.forEach { it.setFilter(GLES20.GL_LINEAR, GLES20.GL_LINEAR) }
+        op = Op.Filter(spec, b, target, orig, made[1], made[2])
+        markDirty(b)
+        return true
+    }
+
+    /** 현재 값으로 result를 다시 계산합니다. */
+    private fun runFilter(d: Document, o: Op.Filter) {
+        val n = d.find(if (o.target < 0) -o.target else o.target)
+        val lock = o.target > 0 && n?.props?.alphaLock == true
+        val spec = o.spec
+        val k = spec.kind
+        val w = o.bounds.w
+        val h = o.bounds.h
+        val p = spec.values.toFloatArray()
+        GlState.off()
+        GlState.noScissor()
+        if (k.blurs) {
+            val radius = spec[0]
+            val taps = FilterKind.taps(radius)
+            o.result.bind()
+            compositor.drawFilter(4, o.orig.tex, floatArrayOf(radius), 1f / w, 0f, taps)
+            o.work.bind()
+            compositor.drawFilter(4, o.result.tex, floatArrayOf(radius), 0f, 1f / h, taps)
+        } else {
+            o.work.bind()
+            compositor.drawFilter(k.shaderId, o.orig.tex, p)
+        }
+        o.result.bind()
+        val sharpen = k == FilterKind.SHARPEN
+        compositor.drawFilterCombine(o.orig.tex, o.work.tex, selTexIfAny(), o.bounds, d.width, d.height, lock, sharpen, if (sharpen) spec[1] else 0f)
+        o.stale = false
+    }
+
+    private fun commitFilterGl(o: Op.Filter, d: Document) {
+        val s = surfaces[o.target]
+        if (s == null) {
+            endFilter(o); return
+        }
+        if (o.stale) runFilter(d, o)
+        val b = o.bounds
+        val m = floatArrayOf(1f, 0f, 0f, 1f, b.x.toFloat(), b.y.toFloat())
+        val saved = HashMap<Int, ByteBuffer?>()
+        for (key in s.keysIntersecting(b)) {
+            val r = b.intersect(s.tileRect(key)) ?: continue
+            saved[key] = s.read(key)
+            val t = s.getOrCreate(key)
+            s.bindCanvasSpace(key, t)
+            s.scissorCanvasRect(key, r)
+            GlState.off()
+            compositor.drawAffine(o.result.tex, b.w, b.h, m, d.width, d.height, 1f)
+            GlState.noScissor()
+            s.dropIfEmpty(key)
+        }
+        saved.keys.toList().forEach { k -> if (saved[k] == null && s.tiles[k] == null) saved.remove(k) }
+        if (saved.isNotEmpty()) {
+            history.push(TilesCommand(o.target, saved))
+            version++
+            thumbQueue.add(o.target)
+            notifyHistory()
+        }
+        endFilter(o)
+    }
+
+    private fun endFilter(o: Op.Filter) {
+        o.release()
+        if (op === o) op = null
+        markDirty(o.bounds)
+        main.post { listener.onFilterEnded() }
     }
 
     // ---- 선택 영역 ----
@@ -1955,6 +2113,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val pv = preview!!
         val onMask = isMaskEdit(n)
         val s = surfaces[editId(n)] ?: return
+        (op as? Op.Filter)?.let { if (it.stale) runFilter(d, it) }
         pv.clear(r)
         pv.bind()
         GlState.scissor(r)
@@ -1992,6 +2151,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 }
                 GlState.over()
                 compositor.drawAffine(o.floating.tex, o.bounds.w, o.bounds.h, o.m, d.width, d.height, 1f)
+            }
+            is Op.Filter -> {
+                drawSourceCopy(Src.Tiles(s), 1f, r)
+                o.bounds.intersect(r)?.let { fr ->
+                    // 필터 영역은 결과로 바꿔 끼움 (블렌딩 끔)
+                    GlState.scissor(fr)
+                    GlState.off()
+                    val b = o.bounds
+                    compositor.drawAffine(o.result.tex, b.w, b.h, floatArrayOf(1f, 0f, 0f, 1f, b.x.toFloat(), b.y.toFloat()), d.width, d.height, 1f)
+                }
             }
             null -> drawSourceCopy(Src.Tiles(s), 1f, r)
         }

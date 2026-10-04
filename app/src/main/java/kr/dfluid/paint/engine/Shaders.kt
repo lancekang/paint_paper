@@ -205,6 +205,115 @@ void main() {
 }
 """
 
+    /**
+     * 필터 한 단계 (QUAD_VS, 필터 영역 크기 타깃). 프리멀티플라이드 입출력.
+     * u_kind: 1 색조·채도·명도 (p = 색조°, 채도, 명도), 2 밝기·대비 (p = 밝기, 대비),
+     *         3 색 반전, 4 가우시안 한 방향 (u_dir = 텍셀 단위 방향, p.x = 반지름 px), 5 포스터화 (p.x = 단계)
+     * 흐리기는 선형 보간 텍스처에서 두 탭을 한 번에 읽습니다 (탭 수 절반).
+     */
+    const val FILTER_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_src;
+uniform int u_kind;
+uniform vec4 u_p;
+uniform vec2 u_dir;
+uniform int u_taps;
+out vec4 o;
+
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+    if (u_kind == 4) {
+        float sigma = max(u_p.x * 0.5, 0.3);
+        float k = -0.5 / (sigma * sigma);
+        vec4 acc = texture(u_src, v_uv);
+        float ws = 1.0;
+        for (int i = 1; i <= u_taps; i += 2) {
+            float fi = float(i);
+            float w1 = exp(fi * fi * k);
+            float w2 = exp((fi + 1.0) * (fi + 1.0) * k);
+            float wt = w1 + w2;
+            vec2 d = u_dir * ((fi * w1 + (fi + 1.0) * w2) / wt);
+            acc += (texture(u_src, v_uv + d) + texture(u_src, v_uv - d)) * wt;
+            ws += 2.0 * wt;
+        }
+        o = acc / ws;
+        return;
+    }
+    vec4 S = texture(u_src, v_uv);
+    if (S.a <= 0.0) { o = vec4(0.0); return; }
+    vec3 c = S.rgb / S.a;
+    if (u_kind == 1) {
+        vec3 h = rgb2hsv(c);
+        h.x = fract(h.x + u_p.x / 360.0 + 1.0);
+        h.y = clamp(h.y * (1.0 + u_p.y), 0.0, 1.0);
+        c = hsv2rgb(h);
+        c = u_p.z >= 0.0 ? mix(c, vec3(1.0), u_p.z) : c * (1.0 + u_p.z);
+    } else if (u_kind == 2) {
+        c += u_p.x * 0.5;
+        float f = u_p.y >= 0.0 ? 1.0 / (1.0 - u_p.y * 0.95) : 1.0 + u_p.y;
+        c = (c - 0.5) * f + 0.5;
+    } else if (u_kind == 3) {
+        c = 1.0 - c;
+    } else if (u_kind == 5) {
+        float n = max(u_p.x - 1.0, 1.0);
+        c = floor(c * n + 0.5) / n;
+    }
+    o = vec4(clamp(c, 0.0, 1.0) * S.a, S.a);
+}
+"""
+
+    /**
+     * 필터 결과를 원본과 합칩니다 (QUAD_VS, 필터 영역 크기 타깃).
+     * u_sharpen = 1: u_filt는 흐린 이미지, 결과 = 원본 + (원본 − 흐림) × u_amount
+     * u_lock = 1 (투명 픽셀 잠금): 알파는 원본 그대로, 색만 필터 결과
+     * u_useSel = 1: 선택 영역만큼만 섞음. u_rect = 필터 영역(캔버스 px)
+     */
+    const val FILTER_COMBINE_FS = """#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_orig;
+uniform sampler2D u_filt;
+uniform sampler2D u_sel;
+uniform int u_useSel;
+uniform int u_lock;
+uniform int u_sharpen;
+uniform float u_amount;
+uniform vec4 u_rect;
+uniform vec2 u_canvas;
+out vec4 o;
+void main() {
+    vec4 O = texture(u_orig, v_uv);
+    vec4 F = texture(u_filt, v_uv);
+    if (u_sharpen == 1) {
+        vec4 r = O + (O - F) * u_amount;
+        float a = clamp(r.a, 0.0, 1.0);
+        F = vec4(clamp(r.rgb, vec3(0.0), vec3(a)), a);
+    }
+    if (u_lock == 1) {
+        vec3 c = F.a > 0.0 ? F.rgb / F.a : (O.a > 0.0 ? O.rgb / O.a : vec3(0.0));
+        F = vec4(clamp(c, 0.0, 1.0) * O.a, O.a);
+    }
+    float k = 1.0;
+    if (u_useSel == 1) k = texture(u_sel, (u_rect.xy + v_uv * u_rect.zw) / u_canvas).r;
+    o = mix(O, F, k);
+}
+"""
+
     /** 캔버스 → 화면. u_view = 캔버스 px → 화면 px 아핀 행렬. */
     const val DISPLAY_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;

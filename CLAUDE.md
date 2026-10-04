@@ -17,6 +17,7 @@
   - **레이어 마스크**: 마스크 픽셀은 surfaces[-id] (알파 = 가리는 정도, 없는 타일 = 보임). 마스크 편집 중(CanvasRenderer.maskEditing)에는 editId(n) = -id로 그리고, 그리기↔지우개를 뒤집어 확정합니다(commitToActive/updatePreview). 합성은 layerSrc()가 maskTmp에 "레이어 × (1 − 마스크)"를 만들어 씀. 구조 변경(applyShape)이 -id surface도 보관/복원. 레이어를 이동·변형하면 마스크도 같은 행렬로 함께 옮김(Op.Transform.maskFloating/maskMatrix, placeFloating). .dfp는 layers/<id>_mask.png, PSD는 채널 -2(255 − 가림).
   - **입·출 처리** (`input/StrokeTaper.kt`): 원래 스탬프와 시작점부터 거리를 기록. 입은 그리는 중에 반지름 배율, 출은 펜을 뗄 때 획 전체를 다시 계산해 `CanvasRenderer.setStrokeLine`으로 스트로크 버퍼를 통째로 다시 그림. 가늘어진 구간은 스탬프 보충. 값은 `Brush.taperIn/taperOut`(캔버스 px).
   - **원근 자·동심원 자** (`input/GuideRuler.kt`): 획 시작 후 10dp 움직일 때까지 점을 모았다가(`CanvasView.feedPoint/resolveRuler`) 방향이 가장 가까운 직선/원을 고르고 이후 점을 투영. 손잡이 위에서 시작하면 Mode.RULER로 손잡이 이동. 안내선은 `OverlayView.drawRuler`. 자 상태는 AppSettings.rulerState에 저장(onPause), 캔버스 크기가 바뀌면 비율대로 옮김(fitCanvas).
+  - **필터 · 색조 보정** (`engine/Filters.kt`, `Shaders.FILTER_FS/FILTER_COMBINE_FS`): Op.Filter가 필터 영역(내용 타일 경계 + 흐리기 여백, 선택이 있으면 그 경계와 교차) 크기 버퍼 3장(orig/work/result)을 잡고, 값이 바뀌면 stale만 표시해 다음 합성 때 한 번 계산(흐리기 = 가로·세로 2패스, 선형 보간 탭). 합치는 단계에서 선택 영역·투명 잠금·언샤프를 처리. 확정은 result를 타일에 블렌딩 없이 덮어쓰고 TilesCommand 한 단계. UI는 `MainActivity.showFilter`(배경을 어둡게 하지 않는 아래쪽 대화상자), 끝나면 `Listener.onFilterEnded`.
   - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널, 마스크·효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 
 ## 빌드 (Windows)

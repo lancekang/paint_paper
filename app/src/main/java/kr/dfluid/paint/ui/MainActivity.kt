@@ -34,6 +34,8 @@ import kr.dfluid.paint.document.NodeInfo
 import kr.dfluid.paint.document.ProjectIO
 import kr.dfluid.paint.document.PsdIO
 import kr.dfluid.paint.engine.CanvasRenderer
+import kr.dfluid.paint.engine.FilterKind
+import kr.dfluid.paint.engine.FilterSpec
 import kr.dfluid.paint.engine.PerfMonitor
 import kr.dfluid.paint.engine.SelOp
 import kr.dfluid.paint.engine.SelShape
@@ -95,6 +97,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     // 변형 / 이동 도구
     private var transforming = false
+    /** 열려 있는 필터 대화상자 (미리보기 중) */
+    private var filterDialog: android.app.AlertDialog? = null
     private var moveSession = false
     private var pendingMoveX = 0f
     private var pendingMoveY = 0f
@@ -403,6 +407,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("편집")
         undoBtn = barBtn(R.drawable.ic_undo, "실행취소", Action.UNDO) { renderer.undo() }
         redoBtn = barBtn(R.drawable.ic_redo, "다시실행", Action.REDO) { renderer.redo() }
+        barBtn(R.drawable.ic_adjust, "필터 · 색조 보정 (색조/채도/명도, 밝기/대비, 흐리기 등)") { chooseFilter() }
         group("선택")
         act(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM)
         act(R.drawable.ic_deselect, "선택 해제", Action.SELECT_NONE)
@@ -1093,6 +1098,98 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onBenchmarkDone(report: String) {
         benchText.text = report + String.format("\n(관문 2: 브러시 영역 합성이 %.1fms 이내면 %.0f fps 유지)", 1000f / 60f, 60f)
         Log.i(TAG, "benchmark\n$report")
+    }
+
+    override fun onFilterEnded() {
+        // 적용·취소 외의 이유(시작 실패, 앱 일시정지 등)로 끝났으면 대화상자도 닫습니다.
+        val dlg = filterDialog ?: return
+        filterDialog = null
+        if (dlg.isShowing) dlg.dismiss()
+    }
+
+    // =====================================================================
+    // 필터 · 색조 보정
+    // =====================================================================
+
+    private fun chooseFilter() {
+        if (transforming) commitTransform()
+        val kinds = FilterKind.entries
+        Ui.dialog(this)
+            .setTitle("필터 · 색조 보정")
+            .setItems(kinds.map { it.label }.toTypedArray()) { _, which -> showFilter(kinds[which]) }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    /** 값 슬라이더 대화상자. 움직이는 동안 캔버스에 미리보기, 적용하면 실행취소 한 단계. */
+    private fun showFilter(kind: FilterKind) {
+        val ctx = this
+        val values = IntArray(kind.params.size) { kind.params[it].default }
+        fun spec() = FilterSpec(kind, kind.params.mapIndexed { i, p -> values[i] * p.scale })
+        fun label(i: Int): String {
+            val p = kind.params[i]
+            val v = values[i]
+            return (if (p.min < 0 && v > 0) "+" else "") + v + p.suffix
+        }
+        val pad = Ui.dp(ctx, 20f)
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+        }
+        val rows = kind.params.mapIndexed { i, p ->
+            Ui.SliderRow(ctx, p.label, p.max - p.min).also { row ->
+                row.set(values[i] - p.min, label(i))
+                row.onChange = { prog ->
+                    values[i] = prog + p.min
+                    row.set(prog, label(i))
+                    renderer.setFilter(spec())
+                }
+                body.addView(row.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = Ui.dp(ctx, 4f)
+                })
+            }
+        }
+        if (kind.params.isEmpty()) body.addView(Ui.text(ctx, "색을 반전합니다.", 13f))
+        body.addView(Ui.text(ctx, if (renderer.maskEditing) "마스크에 적용합니다." else "선택 영역이 있으면 그 안에만 적용합니다.", 11.5f, Ui.MUTED).apply {
+            setPadding(0, Ui.dp(ctx, 6f), 0, 0)
+        })
+        var finished = false
+        val dlg = Ui.dialog(ctx)
+            .setTitle(kind.label)
+            .setView(body)
+            .setPositiveButton("적용") { _, _ ->
+                finished = true
+                renderer.commitFilter()
+            }
+            .setNegativeButton("취소", null)
+            .apply { if (kind.params.isNotEmpty()) setNeutralButton("초기화", null) }
+            .create()
+        dlg.setOnDismissListener {
+            if (!finished) {
+                finished = true
+                renderer.cancelFilter()
+            }
+            if (filterDialog === dlg) filterDialog = null
+        }
+        dlg.setOnShowListener {
+            // 초기화는 대화상자를 닫지 않게 직접 처리
+            dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                kind.params.forEachIndexed { i, p ->
+                    values[i] = p.default
+                    rows[i].set(p.default - p.min, label(i))
+                }
+                renderer.setFilter(spec())
+            }
+        }
+        // 미리보기가 보이게: 배경을 어둡게 하지 않고 화면 아래쪽에 띄움
+        dlg.window?.let { w ->
+            w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setGravity(Gravity.BOTTOM)
+        }
+        filterDialog = dlg
+        dlg.show()
+        renderer.beginFilter(spec())
     }
 
     @Suppress("DEPRECATION")

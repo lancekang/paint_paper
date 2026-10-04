@@ -31,6 +31,8 @@ class Compositor {
     val hasFetch: Boolean get() = fetchPrograms != null
     private val display = GlProgram(Shaders.DISPLAY_VS, Shaders.DISPLAY_FS)
     private val cursor = GlProgram(Shaders.QUAD_VS, Shaders.CURSOR_FS)
+    private val filter = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_FS)
+    private val filterCombine = GlProgram(Shaders.QUAD_VS, Shaders.FILTER_COMBINE_FS)
     private val viewMatrix = FloatArray(9)
     private val affine = FloatArray(9)
 
@@ -172,6 +174,40 @@ class Compositor {
         GLES20.glUniform1f(p.u("u_opacity"), opacity)
         GLES20.glUniform1i(p.u("u_mode"), mode)
         GLES20.glUniform1i(p.u("u_preserve"), if (preserve) 1 else 0)
+    }
+
+    /** 필터 한 단계: srcTex → 현재 타깃(같은 크기). 블렌딩 끄고 호출. [dirX]/[dirY] = 흐리기 방향(텍셀). */
+    fun drawFilter(kind: Int, srcTex: Int, p: FloatArray, dirX: Float = 0f, dirY: Float = 0f, taps: Int = 0) {
+        filter.use()
+        bindTex(0, srcTex)
+        GLES20.glUniform1i(filter.u("u_src"), 0)
+        GLES20.glUniform1i(filter.u("u_kind"), kind)
+        GLES20.glUniform4f(filter.u("u_p"), p.getOrElse(0) { 0f }, p.getOrElse(1) { 0f }, p.getOrElse(2) { 0f }, p.getOrElse(3) { 0f })
+        GLES20.glUniform2f(filter.u("u_dir"), dirX, dirY)
+        GLES20.glUniform1i(filter.u("u_taps"), taps)
+        quad.draw()
+    }
+
+    /** 필터 결과 + 원본 → 현재 타깃. rect = 필터 영역(캔버스 px). selTex = 0이면 선택 없음. */
+    fun drawFilterCombine(origTex: Int, filtTex: Int, selTex: Int, rect: IRect, canvasW: Int, canvasH: Int, lock: Boolean, sharpen: Boolean, amount: Float) {
+        val p = filterCombine
+        p.use()
+        bindTex(0, origTex)
+        bindTex(1, filtTex)
+        bindTex(2, selTex)
+        GLES20.glUniform1i(p.u("u_orig"), 0)
+        GLES20.glUniform1i(p.u("u_filt"), 1)
+        GLES20.glUniform1i(p.u("u_sel"), 2)
+        GLES20.glUniform1i(p.u("u_useSel"), if (selTex != 0) 1 else 0)
+        GLES20.glUniform1i(p.u("u_lock"), if (lock) 1 else 0)
+        GLES20.glUniform1i(p.u("u_sharpen"), if (sharpen) 1 else 0)
+        GLES20.glUniform1f(p.u("u_amount"), amount)
+        GLES20.glUniform4f(p.u("u_rect"), rect.x.toFloat(), rect.y.toFloat(), rect.w.toFloat(), rect.h.toFloat())
+        GLES20.glUniform2f(p.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        quad.draw()
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        unbind1()
     }
 
     /** view = [m00, m10, m01, m11, tx, ty, scale] (Viewport.toGl) */
