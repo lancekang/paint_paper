@@ -124,6 +124,9 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** CanvasView가 설정합니다. */
     var requestRender: () -> Unit = {}
 
+    /** 팁 이미지 찾기 (벡터 선을 다시 그릴 때, 아직 올리지 않은 팁). GL 스레드에서 불림. */
+    var tipProvider: (String) -> kr.dfluid.paint.brush.TipImage? = { null }
+
     private val main = Handler(Looper.getMainLooper())
     private val commands = ConcurrentLinkedQueue<() -> Unit>()
     private val worker = Executors.newSingleThreadExecutor()
@@ -339,6 +342,11 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         if (onVector && brush.isEraser) {
             op = Op.VErase(n.id, vectors[n.id] ?: emptyList())
+            return@post
+        }
+        if (onVector && (hasSelection || n.props.alphaLock)) {
+            // 선 데이터에는 선택·잠금 잘림이 남지 않아, 나중에 다시 그리면 잘린 부분이 되살아남
+            reportError("벡터 레이어에는 선택 영역이나 투명 픽셀 잠금 안에서 그릴 수 없습니다. 선택을 해제하거나 래스터화하세요.")
             return@post
         }
         if (brush.isBlend) {
@@ -650,6 +658,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         finishOp()
         val d = doc ?: return@post
         val n = editableActive(allowText = !cut, allowVector = !cut, allowLocked = !cut) ?: return@post
+        if (cut && n.props.alphaLock && !isMaskEdit(n)) {
+            reportError("투명 픽셀 잠금 레이어는 잘라낼 수 없습니다. 복사를 쓰거나 잠금을 푸세요.")
+            return@post
+        }
         val s = surfaces[editId(n)] ?: return@post
         val area = (if (hasSelection) selBounds else s.tileBounds()?.let { contentBounds(s, it) }) ?: run {
             reportError("복사할 픽셀이 없습니다.")
@@ -754,6 +766,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** [i]번째 프레임으로 (그 셀을 활성 레이어로). playing = 재생 중이면 어니언 스킨을 그리지 않음. */
     fun setFrame(i: Int, playing: Boolean = false) = post {
         val d = doc ?: return@post
+        // 재생 중에 그리고 있으면 그 획을 끊지 않도록 이번 틱은 건너뜀
+        if (playing && op != null) return@post
         animPlaying = playing
         setFrameGl(d, i)
     }
@@ -780,7 +794,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
      */
     fun captureFrame(i: Int, callback: (Int, Int, ByteBuffer?) -> Unit) = post {
         finishOp()
-        val d = doc ?: return@post
+        val d = doc ?: run { callback(0, 0, null); return@post }
         val f = animFolder(d)
         if (f == null || f.children.isEmpty()) {
             callback(d.width, d.height, null)
@@ -821,10 +835,10 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val n = if (duplicate && src != null) cloneSubtree(doc, src, "${at + 1}")
             else Node(doc.newId(), NodeKind.RASTER, LayerProps("${at + 1}"))
             insert(f, at, n)
+            renameFrames(f) // 구조 변경 기록 안에서 번호를 다시 매겨야 실행취소·다시실행과 맞음
             n.id
         }
         animFrame = at
-        animFolder(d)?.let { renameFrames(d, it) } // structural이 트리를 다시 만들었을 수 있음
         setFrameGl(d, at)
     }
 
@@ -840,39 +854,40 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val idx = animFrame.coerceIn(0, f.children.size - 1)
         structural { _ ->
             f.children.removeAt(idx)
+            renameFrames(f)
             f.children[(idx - 1).coerceAtLeast(0)].id
         }
         animFrame = (idx - 1).coerceAtLeast(0)
-        animFolder(d)?.let { renameFrames(d, it) }
         setFrameGl(d, animFrame)
     }
 
     /** 프레임 이름이 숫자뿐이면 순서대로 다시 매김 (사용자가 바꾼 이름은 그대로). */
-    private fun renameFrames(d: Document, f: Node) {
-        var changed = false
+    private fun renameFrames(f: Node) {
         f.children.forEachIndexed { i, c ->
             val want = "${i + 1}"
-            if (c.props.name != want && c.props.name.all { it.isDigit() }) {
-                c.props = c.props.copy(name = want)
-                changed = true
-            }
+            if (c.props.name != want && c.props.name.all { it.isDigit() }) c.props = c.props.copy(name = want)
         }
-        if (changed) notifyLayers()
     }
 
     /** 애니메이션 폴더: 현재 프레임 셀만, 어니언 스킨이면 앞(빨강)·뒤(파랑) 셀을 옅게 먼저. */
     private fun composeAnim(n: Node, t: PingPong, r: IRect, depth: Int) {
+        if (n.children.isEmpty()) return
+        val g = pairAt(depth + 1)
+        g.cur.clear(r)
+        animContent(n, g, r, depth)
+        drawSource(Src.Tex(g.cur), t, normalBlend(n), n.props.opacity, false, r)
+    }
+
+    /** 애니메이션 폴더의 현재 프레임(+어니언 스킨)을 [g]에 (g = pairAt(depth + 1), 이미 비워 둔 것) */
+    private fun animContent(n: Node, g: PingPong, r: IRect, depth: Int) {
         val kids = n.children
         if (kids.isEmpty()) return
         val f = animFrame.coerceIn(0, kids.size - 1)
-        val g = pairAt(depth + 1)
-        g.cur.clear(r)
         if (onionSkin && !animPlaying) {
             kids.getOrNull(f - 1)?.let { drawOnion(it, g, r, ONION_PREV) }
             kids.getOrNull(f + 1)?.let { drawOnion(it, g, r, ONION_NEXT) }
         }
         composeChildren(kids, f, f + 1, g, r, depth + 1)
-        drawSource(Src.Tex(g.cur), t, normalBlend(n), n.props.opacity, false, r)
     }
 
     private fun drawOnion(cel: Node, g: PingPong, r: IRect, color: Int) {
@@ -1203,6 +1218,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             finishOp()
             if (id != d.activeId) {
                 d.activeId = id
+                // 애니메이션 셀을 고르면 그 프레임을 보여 줌 (안 보이는 셀에 그리지 않게)
+                if (n.parent?.props?.animation == true) animFrame = n.index
                 belowValid = false
                 markAllDirty()
             }
@@ -1918,7 +1935,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
         releaseAll()
         surfaces.putAll(newSurfaces)
-        vectors.clear()
+        // 실행취소 기록을 유지하면 지운 레이어(parked)의 선도 남겨 둠
+        if (!keepHistory) vectors.clear()
         for (n in data.nodes) n.vector?.let { vectors[n.id] = it }
         animFrame = 0
         animPlaying = false
@@ -2332,7 +2350,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             }
         }
         // 텍스트 레이어: 평행이동만이면 위치를 옮기고, 회전·확대 등이면 픽셀로 굳힘
-        n.props.text?.let { t ->
+        n.props.text?.takeIf { !isMaskEdit(n) }?.let { t ->
             val before = d.shape()
             val m = o.m
             val pure = o.h == null && !hasSelection && !isMaskEdit(n) && m[0] == 1f && m[1] == 0f && m[2] == 0f && m[3] == 1f
@@ -2586,7 +2604,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             val r = vr.intersect(area) ?: continue
             sb.clear()
             v.fill?.let { rasterizeFill(it, d) }
-            brushEngine.draw(sb, v.stamps, v.brush, v.brush.tipId?.let { tips[it] } ?: 0)
+            val tip = v.brush.tipId?.let { id -> tips[id] ?: tipProvider(id)?.let { ensureTip(it) } } ?: 0
+            brushEngine.draw(sb, v.stamps, v.brush, tip)
             val c = premul(v.color, 1f)
             for (key in s.keysIntersecting(r)) {
                 val tr = r.intersect(s.tileRect(key)) ?: continue
@@ -2923,6 +2942,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     g.cur.clear(r)
                     if (n.isRaster) {
                         drawSource(layerSrc(n, r), g, BlendMode.NORMAL, 1f, false, r)
+                    } else if (n.props.animation) {
+                        animContent(n, g, r, depth)
                     } else {
                         composeChildren(n.children, 0, n.children.size, g, r, depth + 1)
                     }

@@ -193,6 +193,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Ui.applyTheme(resolveDark())
         renderer = CanvasRenderer(this)
         renderer.setBackdrop(Ui.CANVAS_BG)
+        renderer.tipProvider = { id -> library.tip(id) }
         renderer.defaultBackground = settings.newCanvasBackground
         canvasView = CanvasView(this, renderer)
         canvasView.host = this
@@ -1918,7 +1919,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
         fun step(i: Int) {
             renderer.captureFrame(i) { w, h, buf ->
-                if (buf == null) { fail("메모리가 부족해 GIF로 내보내지 못했습니다."); return@captureFrame }
+                if (buf == null) { fail("GIF로 내보내지 못했습니다 (메모리 부족이거나 애니메이션이 없습니다)."); return@captureFrame }
                 io.execute {
                     try {
                         val full = ProjectIO.toBitmap(w, h, buf)

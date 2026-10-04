@@ -207,6 +207,8 @@ class BrushLibrary(context: Context) {
         }
     }
 
+    /** UI 스레드와 GL 스레드(벡터 선 다시 그리기)에서 불림 */
+    @Synchronized
     fun tip(id: String): TipImage? {
         tipCache[id]?.let { return it }
         val f = File(tipDir, "$id.png")

@@ -67,14 +67,25 @@ class History(
 
     fun undo(s: LayerStore): Boolean {
         val c = undoStack.removeLastOrNull() ?: return false
-        c.undo(s)
+        try {
+            c.undo(s)
+        } catch (t: Throwable) {
+            // 실패하면 기록을 그대로 둡니다 (빠지면 이후 단계들이 다른 문서 상태에 적용됨)
+            undoStack.addLast(c)
+            throw t
+        }
         redoStack.addLast(c)
         return true
     }
 
     fun redo(s: LayerStore): Boolean {
         val c = redoStack.removeLastOrNull() ?: return false
-        c.redo(s)
+        try {
+            c.redo(s)
+        } catch (t: Throwable) {
+            redoStack.addLast(c)
+            throw t
+        }
         undoStack.addLast(c)
         return true
     }
