@@ -37,6 +37,17 @@
   - **색 카드 탭**: 서클/사각형/중간색/세트/슬라이더(`ColorSliders.kt`).
   - **보조 도구 파일** (`BrushLibrary.exportBrush/importBrush`, .dfbrush = JSON + 팁 PNG base64). brushes.json의 `rev`로 기본 보조 도구를 한 번만 추가(유동화).
   - **흑백 보기** (`CanvasRenderer.grayView`, DISPLAY_FS u_gray): 화면 표시만.
+  - **2026-10-05 새벽 추가 (기기 미확인, `docs/DEVICE_CHECKLIST.md`)**:
+    - 다중 선택 (`LayerPanel.multi/picked`, `CanvasRenderer.deleteNodes/groupNodes/mergeNodes`): 합치기는 `composeOnly`로 고른 것만 합성, 결과는 모두를 품는 폴더(commonParent)에, 그 폴더와 위 폴더 효과는 잠깐 끄고 합성. clipProblem이 클리핑 관계가 깨지는 선택을 막음.
+    - 레벨 보정(u_kind 7) · 톤 커브(u_kind 8, 값 8개 뒤 256칸 표 → `u_lut` vec4×64).
+    - 메시 변형 (`engine/MeshWarp.kt`): 5×5 조절점 Catmull-Rom 곡면 → 삼각형(MESH_VS, `MeshBuffer`). Op.Transform.mesh/meshTri, setTransform이 50개짜리 배열을 메시로 봄. 마스크가 있는 레이어는 UI가 막음, 선택 영역은 확정 때 해제.
+    - 작업 내역 (`History.nextLabel/labels`, `CanvasRenderer.labeled{}`로 이름 붙임, `jumpHistory`).
+    - 덧칠 (`FloodFill.paintOver`): 4px 간격 씨앗마다 run, 진한 선 위 씨앗은 건너뜀.
+    - 효과선 (`engine/EffectLines.kt`): 집중선·유선을 VStroke 목록으로 → 새 벡터 레이어(rasterStrokes).
+    - 도형 다각형·별 (shapeKind 5·6, shapeSides).
+    - 타임랩스 (`processTimelapse` → `onTimelapseFrame` → cacheDir/timelapse/*.jpg → `writeTimelapse` MP4).
+    - 필압 자동 조정 (`ui/PressurePad.kt`): 가운데값 → 0.5가 되는 감마.
+    - 색조 보정 레이어 (`LayerProps.adjustKind/adjustValues`, `composeAdjust`): 합성 중 t.cur를 필터에 통과시켜 GL_CONSTANT_ALPHA(불투명도)로 섞음. 흐리기 계열 제외, 마스크 무시, 그리기·병합 막음. 편집은 `MainActivity.showFilter(kind, adjustId, adjustStart)`.
   - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널과 레이어 마스크(채널 -2), 효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 
 ## 빌드 (Windows)
