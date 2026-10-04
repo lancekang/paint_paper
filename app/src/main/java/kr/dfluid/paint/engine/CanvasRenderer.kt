@@ -302,12 +302,14 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
      * 직선 자 미리보기: 스트로크 버퍼를 비우고 주어진 스탬프로 다시 그립니다.
      * 매 이동마다 호출해 시작점→현재점 직선을 갱신합니다. (대칭 복제본 포함 전체 스탬프를 한 번에 넘길 것)
      */
-    fun setStrokeLine(stamps: FloatArray) = post {
+    fun setStrokeLine(stamps: FloatArray, fill: FloatArray? = null) = post {
         val o = op as? Op.Stroke ?: return@post
         val d = doc ?: return@post
         strokeBuf!!.clear()
         val prev = o.rect
         o.rect = null
+        // 채우기 다각형 (도형 도구): 먼저 커버리지로 올리고, 선 스탬프는 그 위에 최댓값으로 겹칩니다.
+        if (fill != null && fill.size >= 6) o.rect = rasterizeFill(fill, d)
         if (stamps.isNotEmpty()) {
             brushEngine.draw(strokeBuf!!, stamps, o.brush, o.tipTex)
             var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
@@ -318,7 +320,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                 r = max(r, stamps[i] + rad); b = max(b, stamps[i + 1] + rad)
                 i += StrokeBuilder.FLOATS
             }
-            o.rect = IRect.ofBounds(l, t, r, b, d.width, d.height)
+            IRect.ofBounds(l, t, r, b, d.width, d.height)?.let { o.rect = it.union(o.rect) }
         }
         // 이전 직선이 있던 영역까지 다시 합성해야 지워집니다.
         val dirty = o.rect?.union(prev) ?: prev
@@ -326,6 +328,35 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     }
 
     fun endStroke() = post { finishOp() }
+
+    /** 다각형 [pts](캔버스 좌표 x,y…)를 안티에일리어싱해 strokeBuf의 그 영역에 올립니다. 영역을 돌려줍니다. */
+    private fun rasterizeFill(pts: FloatArray, d: Document): IRect? {
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        var i = 0
+        while (i + 1 < pts.size) {
+            l = min(l, pts[i]); r = max(r, pts[i]); t = min(t, pts[i + 1]); b = max(b, pts[i + 1]); i += 2
+        }
+        val rect = IRect.ofBounds(l - 1f, t - 1f, r + 1f, b + 1f, d.width, d.height) ?: return null
+        val path = android.graphics.Path()
+        path.moveTo(pts[0] - rect.x, pts[1] - rect.y)
+        i = 2
+        while (i + 1 < pts.size) {
+            path.lineTo(pts[i] - rect.x, pts[i + 1] - rect.y); i += 2
+        }
+        path.close()
+        val bmp = Bitmap.createBitmap(rect.w, rect.h, Bitmap.Config.ALPHA_8)
+        android.graphics.Canvas(bmp).drawPath(path, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
+        val rb = bmp.rowBytes
+        val raw = ByteBuffer.allocate(rb * rect.h)
+        bmp.copyPixelsToBuffer(raw)
+        bmp.recycle()
+        val tight = GlUtil.byteBuffer(rect.w * rect.h)
+        val arr = raw.array()
+        for (y in 0 until rect.h) tight.put(arr, y * rb, rect.w)
+        tight.rewind()
+        strokeBuf!!.upload(rect.x, rect.y, rect.w, rect.h, tight)
+        return rect
+    }
 
     fun cancelStroke() = post {
         (op as? Op.Smudge)?.let { s ->

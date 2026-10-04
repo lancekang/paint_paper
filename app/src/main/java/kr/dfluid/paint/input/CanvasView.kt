@@ -39,6 +39,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val drawWithFinger: Boolean
         val symmetry: Symmetry
         val straightLine: Boolean
+        /** 도형 도구: 종류(0 직선, 1 사각형, 2 타원, 3 올가미 채우기)와 채우기(0 선, 1 채우기, 2 둘 다) */
+        val shapeKind: Int
+        val shapeFill: Int
         /** 원근 자·동심원 자 */
         val ruler: GuideRuler
         /** 자 손잡이(소실점·중심)를 옮겼을 때 (안내선 다시 그리기) */
@@ -69,7 +72,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     var host: Host? = null
     val viewport = Viewport()
 
-    private enum class Mode { NONE, DRAW, PICK, DRAG_PAN, DRAG_ROTATE, DRAG_ZOOM, GESTURE, IGNORE, SELECT, GRADIENT, MOVE, RULER }
+    private enum class Mode { NONE, DRAW, PICK, DRAG_PAN, DRAG_ROTATE, DRAG_ZOOM, GESTURE, IGNORE, SELECT, GRADIENT, MOVE, RULER, SHAPE }
+
+    // ---- 도형 ----
+    private var shapeBrush: Brush? = null
+    private val lassoPts = ArrayList<Float>()
 
     // ---- 원근 자·동심원 자 ----
     // 획을 시작하고 RULER_DECIDE_DP 만큼 움직여야 방향을 알 수 있으므로, 그 전까지의 점은 모아 둡니다.
@@ -238,6 +245,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             MotionEvent.ACTION_CANCEL -> {
                 when (mode) {
                     Mode.DRAW -> { lineMode = false; lineBrush = null; renderer.cancelStroke() }
+                    Mode.SHAPE -> { shapeBrush = null; renderer.cancelStroke() }
                     Mode.GRADIENT -> h.onGradient(0f, 0f, 0f, 0f, 2)
                     Mode.SELECT -> h.onSelectPreview(selShape, FloatArray(0))
                     Mode.MOVE -> h.onMoveEnd()
@@ -273,7 +281,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             if (primaryIsPen && penBusy()) return
             // 손바닥이 먼저 닿아 있었다면 그 동작을 취소하고 펜을 우선
             when (mode) {
-                Mode.DRAW -> renderer.cancelStroke()
+                Mode.DRAW, Mode.SHAPE -> renderer.cancelStroke()
                 Mode.GRADIENT -> h.onGradient(0f, 0f, 0f, 0f, 2)
                 Mode.SELECT -> h.onSelectPreview(selShape, FloatArray(0))
                 Mode.MOVE -> h.onMoveEnd()
@@ -290,7 +298,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         if (mode == Mode.IGNORE) return
         if (fingers >= 2) {
             when (mode) {
-                Mode.DRAW -> renderer.cancelStroke()
+                Mode.DRAW, Mode.SHAPE -> renderer.cancelStroke()
                 Mode.GRADIENT -> h.onGradient(0f, 0f, 0f, 0f, 2)
                 Mode.SELECT -> h.onSelectPreview(selShape, FloatArray(0))
                 Mode.MOVE -> h.onMoveEnd()
@@ -345,6 +353,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 h.onFillTap(downCx, downCy)
                 Mode.IGNORE
             }
+            tool == Tool.SHAPE && e.getToolType(i) != MotionEvent.TOOL_TYPE_ERASER -> Mode.SHAPE
             tool.isBrush || e.getToolType(i) == MotionEvent.TOOL_TYPE_ERASER -> Mode.DRAW
             else -> Mode.IGNORE
         }
@@ -357,6 +366,14 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 h.onSelectPreview(selShape, selPts.toFloatArray())
             }
             Mode.MOVE -> h.onMoveStart()
+            Mode.SHAPE -> {
+                val brush = h.brushFor(Tool.SHAPE).deepCopy()
+                shapeBrush = brush
+                lassoPts.clear()
+                lassoPts.add(downCx); lassoPts.add(downCy)
+                renderer.beginStroke(brush, h.brushColor, h.tipFor(brush))
+                h.onStrokeStarted()
+            }
             Mode.PICK -> pick(x, y, h)
             Mode.DRAW -> {
                 val eraserTip = e.getToolType(i) == MotionEvent.TOOL_TYPE_ERASER
@@ -437,6 +454,99 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         }
     }
 
+    /**
+     * 도형 미리보기: 시작점(downCx, downCy) → (cx, cy). Shift = 정사각형·정원·45°, Alt = 시작점이 중심.
+     * 선은 스탬프로, 채우기는 다각형으로 렌더러에 넘깁니다 (스트로크 버퍼를 통째로 바꿈).
+     */
+    private fun updateShape(cx: Float, cy: Float, meta: Int, h: Host) {
+        val brush = shapeBrush ?: return
+        val kind = h.shapeKind
+        val shift = (meta and KeyEvent.META_SHIFT_ON) != 0
+        val alt = (meta and KeyEvent.META_ALT_ON) != 0
+        var x1 = cx
+        var y1 = cy
+        val outline: FloatArray
+        val closed: Boolean
+        when (kind) {
+            0 -> {
+                if (shift) {
+                    val len = hypot(x1 - downCx, y1 - downCy)
+                    val a = (Math.round(atan2(y1 - downCy, x1 - downCx) / (PI / 4)) * (PI / 4)).toFloat()
+                    x1 = downCx + len * kotlin.math.cos(a)
+                    y1 = downCy + len * kotlin.math.sin(a)
+                }
+                outline = floatArrayOf(downCx, downCy, x1, y1)
+                closed = false
+            }
+            3 -> {
+                val n = lassoPts.size
+                if (hypot(cx - lassoPts[n - 2], cy - lassoPts[n - 1]) * viewport.scale > 2f) {
+                    lassoPts.add(cx); lassoPts.add(cy)
+                }
+                outline = lassoPts.toFloatArray()
+                closed = true
+            }
+            else -> {
+                var dx = x1 - downCx
+                var dy = y1 - downCy
+                if (shift) {
+                    val m = maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy))
+                    dx = if (dx < 0) -m else m
+                    dy = if (dy < 0) -m else m
+                }
+                val l = if (alt) downCx - kotlin.math.abs(dx) else minOf(downCx, downCx + dx)
+                val r = if (alt) downCx + kotlin.math.abs(dx) else maxOf(downCx, downCx + dx)
+                val t = if (alt) downCy - kotlin.math.abs(dy) else minOf(downCy, downCy + dy)
+                val b = if (alt) downCy + kotlin.math.abs(dy) else maxOf(downCy, downCy + dy)
+                outline = if (kind == 1) floatArrayOf(l, t, r, t, r, b, l, b) else ellipsePoints(l, t, r, b)
+                closed = true
+            }
+        }
+        val fillMode = h.shapeFill
+        val wantFill = kind == 3 || (kind != 0 && fillMode >= 1)
+        val wantLine = kind == 0 || (kind != 3 && fillMode != 1)
+        var stamps = FloatArray(0)
+        if (wantLine && outline.size >= 4) {
+            builder.begin(brush, 0f, outline[0], outline[1], 1f, 0f, 0f)
+            var k = 2
+            while (k + 1 < outline.size) {
+                builder.add(outline[k], outline[k + 1], 1f, 0f, 0f); k += 2
+            }
+            if (closed) builder.add(outline[0], outline[1], 1f, 0f, 0f)
+            builder.finish()
+            stamps = builder.drain() ?: FloatArray(0)
+            if (!closed && (brush.taperIn > 0f || brush.taperOut > 0f)) {
+                taper.begin(brush.taperIn, brush.taperOut)
+                taper.push(stamps)
+                stamps = taper.renderAll()
+            }
+        }
+        val mirrors = if (h.symmetry.on) h.symmetry.mirror(stamps, viewport.canvasW / 2f, viewport.canvasH / 2f) else emptyList()
+        var combined = stamps
+        if (mirrors.isNotEmpty()) {
+            combined = FloatArray(stamps.size + mirrors.sumOf { it.size })
+            System.arraycopy(stamps, 0, combined, 0, stamps.size)
+            var off = stamps.size
+            for (m in mirrors) { System.arraycopy(m, 0, combined, off, m.size); off += m.size }
+        }
+        renderer.setStrokeLine(combined, if (wantFill && outline.size >= 6) outline else null)
+    }
+
+    /** 타원 둘레 점 (화면에서 약 3px 간격). */
+    private fun ellipsePoints(l: Float, t: Float, r: Float, b: Float): FloatArray {
+        val rx = (r - l) / 2f
+        val ry = (b - t) / 2f
+        val perim = (PI * (3 * (rx + ry) - kotlin.math.sqrt(((3 * rx + ry) * (rx + 3 * ry)).toDouble()))).toFloat()
+        val n = (perim * viewport.scale / 3f).toInt().coerceIn(24, 720)
+        val out = FloatArray(n * 2)
+        for (k in 0 until n) {
+            val a = 2 * PI * k / n
+            out[k * 2] = l + rx + rx * kotlin.math.cos(a).toFloat()
+            out[k * 2 + 1] = t + ry + ry * kotlin.math.sin(a).toFloat()
+        }
+        return out
+    }
+
     private fun move(e: MotionEvent, h: Host) {
         for (i in 0 until e.pointerCount) {
             val p = downPos[e.getPointerId(i)] ?: continue
@@ -459,6 +569,12 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     feedPoint(tmp[0], tmp[1], pressure(e, i, -1, h), tilt(e, i, -1), angle(e, i, -1), h)
                     if (!rulerPending) builder.drain()?.let { emitStamps(taper.push(it), h) }
                 }
+            }
+            Mode.SHAPE -> {
+                val i = e.findPointerIndex(primaryId)
+                if (i < 0) return
+                viewport.toCanvas(e.getX(i), e.getY(i), tmp)
+                updateShape(tmp[0], tmp[1], e.metaState, h)
             }
             Mode.RULER -> {
                 val i = e.findPointerIndex(primaryId)
@@ -569,6 +685,16 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 h.onGradient(downCx, downCy, tmp[0], tmp[1], if (tiny) 2 else 1)
             }
             Mode.MOVE -> h.onMoveEnd()
+            Mode.SHAPE -> {
+                viewport.toCanvas(e.getX(i), e.getY(i), tmp)
+                val tiny = hypot(tmp[0] - downCx, tmp[1] - downCy) * viewport.scale < 4f
+                if (tiny) renderer.cancelStroke()
+                else {
+                    updateShape(tmp[0], tmp[1], e.metaState, h)
+                    renderer.endStroke()
+                }
+                shapeBrush = null
+            }
             else -> Unit
         }
         mode = if (e.actionMasked == MotionEvent.ACTION_UP) Mode.NONE else Mode.IGNORE

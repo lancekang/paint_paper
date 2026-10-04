@@ -32,6 +32,10 @@ class AppSettings(context: Context) {
     var wandExpand = 0
     /** 선택 영역 확장/축소/경계 흐리기 범위 (px) */
     var selModifyPx = 4
+    /** 도형 종류: 0 직선, 1 사각형, 2 타원, 3 올가미 채우기 */
+    var shapeKind = 1
+    /** 사각형·타원: 0 선, 1 채우기, 2 선 + 채우기 */
+    var shapeFill = 0
     var wandRef = FillOptions.REF_ALL
     var gradientRadial = false
     var gradientToTransparent = false
@@ -83,6 +87,8 @@ class AppSettings(context: Context) {
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
         selModifyPx = prefs.getInt("selModifyPx", 4)
+        shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 3)
+        shapeFill = prefs.getInt("shapeFill", 0).coerceIn(0, 2)
         wandRef = prefs.getInt("wandRef", if (prefs.getBoolean("wandReferenceAll", true)) FillOptions.REF_ALL else FillOptions.REF_CURRENT)
         gradientRadial = prefs.getBoolean("gradientRadial", false)
         gradientToTransparent = prefs.getBoolean("gradientToTransparent", false)
@@ -137,6 +143,8 @@ class AppSettings(context: Context) {
             .putInt("wandGap", wandGap)
             .putInt("wandExpand", wandExpand)
             .putInt("selModifyPx", selModifyPx)
+            .putInt("shapeKind", shapeKind)
+            .putInt("shapeFill", shapeFill)
             .putInt("wandRef", wandRef)
             .putBoolean("gradientRadial", gradientRadial)
             .putBoolean("gradientToTransparent", gradientToTransparent)

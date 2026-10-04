@@ -73,6 +73,10 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val title = if (tool.isBrush) "보조 도구 · ${tool.label}" else "도구 속성 · ${tool.label}"
         titleView?.let { it.text = title } ?: view.addView(Ui.text(ctx, title, 14f, bold = true))
         when {
+            tool == Tool.SHAPE -> {
+                buildShape()
+                buildBrush()
+            }
             tool.isBrush -> buildBrush()
             tool == Tool.SELECT -> buildSelect()
             tool == Tool.FILL -> buildFill()
@@ -244,6 +248,19 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         }
         val sm = (host.settings.smoothing / 0.95f * 100).roundToInt()
         smoothingRow?.set(sm, "$sm")
+    }
+
+    // ---- 도형 ----
+
+    private fun buildShape() {
+        val s = host.settings
+        view.addView(toggleRow(listOf("직선", "사각형", "타원", "올가미 채우기"), s.shapeKind) {
+            s.shapeKind = it; s.save()
+        }, lp(2f))
+        view.addView(toggleRow(listOf("선", "채우기", "선+채우기"), s.shapeFill) {
+            s.shapeFill = it; s.save()
+        }, lp(4f))
+        view.addView(hint("드래그해 그립니다. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미 채우기는 그린 모양 그대로 칠합니다."), lp())
     }
 
     // ---- 선택 ----

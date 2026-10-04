@@ -11,6 +11,8 @@ enum class Tool(val label: String, val short: String, val isBrush: Boolean) {
     MARKER("마커", "마커", true),
     ERASER("지우개", "지우개", true),
     BLEND("색 혼합", "혼합", true),
+    /** 도형: 브러시 프리셋(선 굵기 등)을 쓰지만 드래그로 직선·사각형·타원을 그립니다 */
+    SHAPE("도형", "도형", true),
     SELECT("선택", "선택", false),
     MOVE("이동", "이동", false),
     FILL("채우기", "채우기", false),
@@ -197,6 +199,10 @@ object BrushPresets {
             id(), tool, "딱딱함", size = 40f, opacity = 1f, flow = 1f, hardness = 0.8f, spacing = 0.08f,
             pressureSize = 0.7f, pressureOpacity = 0f, minSizeRatio = 0.3f,
         )
+        Tool.SHAPE -> Brush(
+            id(), tool, "도형 선", size = 6f, opacity = 1f, flow = 1f, hardness = 0.9f, spacing = 0.05f,
+            pressureSize = 0f, pressureOpacity = 0f, minSizeRatio = 1f,
+        )
         Tool.BLEND -> Brush(
             id(), tool, "손끝", size = 40f, opacity = 0.8f, flow = 1f, hardness = 0.3f, spacing = 0.12f,
             pressureSize = 0.5f, pressureOpacity = 1f, minSizeRatio = 0.5f, mixMode = Brush.MIX_SMUDGE,
@@ -223,6 +229,11 @@ object BrushPresets {
             create(tool).copy(id = id(), name = "강하게", flow = 0.15f, hardness = 0.3f),
         )
         Tool.MARKER -> listOf(create(tool))
+        Tool.SHAPE -> listOf(
+            create(tool),
+            create(tool).copy(id = id(), name = "굵은 선", size = 16f),
+            create(tool).copy(id = id(), name = "입·출 직선", size = 10f, taperIn = 40f, taperOut = 40f),
+        )
         Tool.BLEND -> listOf(
             create(tool),
             create(tool).copy(id = id(), name = "색 늘이기", opacity = 1f, hardness = 0.6f, pressureOpacity = 0.4f),

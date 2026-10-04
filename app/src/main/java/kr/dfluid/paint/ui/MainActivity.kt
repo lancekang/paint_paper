@@ -83,6 +83,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var symBtn: ImageView
     private var straightLineOn = false
     override val straightLine: Boolean get() = straightLineOn
+    override val shapeKind: Int get() = settings.shapeKind
+    override val shapeFill: Int get() = settings.shapeFill
     private lateinit var lineBtn: ImageView
     private val holds = ArrayList<Action>()
     private var shiftHeld = false
@@ -464,7 +466,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val groups = listOf(
             listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER, Tool.BLEND),
             listOf(Tool.SELECT, Tool.MOVE),
-            listOf(Tool.FILL, Tool.GRADIENT),
+            listOf(Tool.FILL, Tool.GRADIENT, Tool.SHAPE),
             listOf(Tool.EYEDROPPER, Tool.HAND),
         )
         groups.forEachIndexed { gi, list ->
@@ -825,6 +827,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.MARKER -> R.drawable.ic_tool_marker
         Tool.ERASER -> R.drawable.ic_tool_eraser
         Tool.BLEND -> R.drawable.ic_tool_blend
+        Tool.SHAPE -> R.drawable.ic_tool_shape
         Tool.SELECT -> R.drawable.ic_tool_select
         Tool.MOVE -> R.drawable.ic_tool_move
         Tool.FILL -> R.drawable.ic_tool_fill
@@ -840,6 +843,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         Tool.MARKER -> Action.TOOL_MARKER
         Tool.ERASER -> Action.TOOL_ERASER
         Tool.BLEND -> Action.TOOL_BLEND
+        Tool.SHAPE -> Action.TOOL_SHAPE
         Tool.SELECT -> Action.TOOL_SELECT
         Tool.MOVE -> Action.TOOL_MOVE
         Tool.FILL -> Action.TOOL_FILL
@@ -1383,6 +1387,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.TOOL_MARKER -> Tool.MARKER
             Action.TOOL_ERASER -> Tool.ERASER
             Action.TOOL_BLEND -> Tool.BLEND
+            Action.TOOL_SHAPE -> Tool.SHAPE
             Action.TOOL_EYEDROPPER -> Tool.EYEDROPPER
             Action.TOOL_HAND -> Tool.HAND
             Action.TOOL_SELECT -> Tool.SELECT
