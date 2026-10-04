@@ -11,6 +11,8 @@ class Compositor {
     private val copy = GlProgram(Shaders.QUAD_VS, Shaders.COPY_FS)
     private val copyTile = GlProgram(Shaders.TILE_VS, Shaders.COPY_FS)
     private val copyAffine = GlProgram(Shaders.AFFINE_VS, Shaders.COPY_FS)
+    private val copyProj = GlProgram(Shaders.PROJ_VS, Shaders.COPY_FS)
+    private val projCols = FloatArray(9)
     private val merge = GlProgram(Shaders.QUAD_VS, Shaders.MERGE_FS)
     private val blend = GlProgram(Shaders.QUAD_VS, Shaders.BLEND_FS)
     private val blendTile = GlProgram(Shaders.TILE_VS, Shaders.BLEND_FS)
@@ -88,6 +90,19 @@ class Compositor {
         GLES20.glUniformMatrix3fv(copyAffine.u("u_m"), 1, false, affine, 0)
         GLES20.glUniform2f(copyAffine.u("u_size"), w.toFloat(), h.toFloat())
         GLES20.glUniform2f(copyAffine.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
+        quad.draw()
+    }
+
+    /** h = 원근 행렬 (행 우선 9개, [Homography]): 로컬 px → 캔버스 px */
+    fun drawProjective(tex: Int, w: Int, h: Int, hm: FloatArray, canvasW: Int, canvasH: Int, opacity: Float) {
+        // GLSL mat3은 열 우선
+        projCols[0] = hm[0]; projCols[1] = hm[3]; projCols[2] = hm[6]
+        projCols[3] = hm[1]; projCols[4] = hm[4]; projCols[5] = hm[7]
+        projCols[6] = hm[2]; projCols[7] = hm[5]; projCols[8] = hm[8]
+        setupCopy(copyProj, tex, opacity, 0, 0)
+        GLES20.glUniformMatrix3fv(copyProj.u("u_h"), 1, false, projCols, 0)
+        GLES20.glUniform2f(copyProj.u("u_size"), w.toFloat(), h.toFloat())
+        GLES20.glUniform2f(copyProj.u("u_canvas"), canvasW.toFloat(), canvasH.toFloat())
         quad.draw()
     }
 

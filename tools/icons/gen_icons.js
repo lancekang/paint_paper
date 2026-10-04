@@ -108,6 +108,8 @@ const icons = {
   undo: ['M9,14L4,9l5,-5', 'M4,9h10.5a5.5,5.5 0 0,1 0,11H11'],
   redo: ['M15,14l5,-5l-5,-5', 'M20,9H9.5a5.5,5.5 0 0,0 0,11H13'],
   transform: [rect(2, 2, 4, 4), rect(18, 2, 4, 4), rect(2, 18, 4, 4), rect(18, 18, 4, 4), 'M6,4h12M6,20h12M4,6v12M20,6v12'],
+  // 원근 변형: 기울어진 사각형 + 모서리 점
+  distort: ['M5,6L19,3L21,20L3,17Z', { d: circle(5, 6, 1.6), fill: true }, { d: circle(19, 3, 1.6), fill: true }, { d: circle(21, 20, 1.6), fill: true }, { d: circle(3, 17, 1.6), fill: true }],
   deselect: [dashedRect, 'M9,9l6,6M15,9l-6,6'],
   // 퀵 마스크: 점선 사각형 안에 채운 원
   quick_mask: [dashedRect, { d: circle(12, 12, 4.5), fill: true }],

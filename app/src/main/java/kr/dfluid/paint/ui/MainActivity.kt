@@ -116,6 +116,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var toolBar: View
     private lateinit var rightPanel: View
     private lateinit var transformBar: View
+    private var distortBtnRef: ImageView? = null
     // ---- 애니메이션 타임라인 ----
     private lateinit var animBar: LinearLayout
     /** 선택 범위 런처: 선택 영역이 있을 때 아래에 뜨는 빠른 동작 */
@@ -659,6 +660,12 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         tbBtn(R.drawable.ic_flip_h, "좌우 반전") { overlay.flip(true) }
         tbBtn(R.drawable.ic_flip_v, "상하 반전") { overlay.flip(false) }
         tbBtn(R.drawable.ic_rotate_90, "90° 회전") { overlay.rotateBy((Math.PI / 2).toFloat()) }
+        lateinit var distortBtn: ImageView
+        distortBtn = tbBtn(R.drawable.ic_distort, "자유 모서리 (원근 변형: 모서리를 따로 끌기)") {
+            overlay.setDistort(!overlay.distort)
+            Ui.setOn(distortBtn, overlay.distort)
+        }
+        distortBtnRef = distortBtn
         tb.addView(Ui.hspace(ctx, 8f))
         Ui.setOn(tbBtn(R.drawable.ic_check, "확정 (Enter)") { commitTransform() }, true)
         tbBtn(R.drawable.ic_close, "취소 (Esc)") { cancelTransform() }
@@ -1346,6 +1353,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onTransformStarted(width: Int, height: Int, matrix: FloatArray) {
         transforming = true
         updateSelBar()
+        distortBtnRef?.let { Ui.setOn(it, false) }
         overlay.startTransform(width, height, matrix)
         if (moveSession && (pendingMoveX != 0f || pendingMoveY != 0f)) overlay.translateBy(pendingMoveX, pendingMoveY)
         pendingMoveX = 0f; pendingMoveY = 0f

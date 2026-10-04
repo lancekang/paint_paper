@@ -79,6 +79,11 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     private var rot = 0f
     private var sx = 1f
     private var sy = 1f
+    /** 자유 모서리(원근) 모드: 네 모서리를 캔버스 좌표로 따로 가짐 (왼위, 오위, 오아래, 왼아래) */
+    var distort = false
+        private set
+    private val quad = FloatArray(8)
+    private var gi = -1
 
     private enum class Grab { NONE, MOVE, ROTATE, CORNER, EDGE }
 
@@ -160,6 +165,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     // =====================================================================
 
     fun startTransform(w: Int, h: Int, m: FloatArray) {
+        distort = false
         tw = w.toFloat(); th = h.toFloat()
         // m은 이동만 있는 초기 행렬이라 중심/배율/회전으로 쉽게 분해됩니다.
         sx = hypot(m[0], m[1]).coerceAtLeast(1e-3f)
@@ -178,12 +184,35 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     fun translateBy(dx: Float, dy: Float) {
-        cx += dx; cy += dy
+        if (distort) {
+            for (i in 0 until 4) { quad[i * 2] += dx; quad[i * 2 + 1] += dy }
+        } else {
+            cx += dx; cy += dy
+        }
         publish()
     }
 
+    /** 자유 모서리(원근) 모드 켜기/끄기. 켤 때 지금 상자의 네 모서리에서 시작합니다. 끄면 원래 상자로. */
+    fun setDistort(on: Boolean) {
+        if (on == distort) return
+        if (on) {
+            val m = matrix()
+            val pts = floatArrayOf(0f, 0f, tw, 0f, tw, th, 0f, th)
+            for (i in 0 until 4) {
+                val u = pts[i * 2]; val v = pts[i * 2 + 1]
+                quad[i * 2] = m[0] * u + m[2] * v + m[4]
+                quad[i * 2 + 1] = m[1] * u + m[3] * v + m[5]
+            }
+        }
+        distort = on
+        publish()
+    }
+
+    private fun homography(): FloatArray = kr.dfluid.paint.engine.Homography.rectToQuad(tw, th, quad)
+
     /** 이동만 했을 때 정수 픽셀로 맞춰 다시 샘플링으로 흐려지지 않게 합니다. */
     fun snapTranslation() {
+        if (distort) return
         if (abs(rot) > 1e-4f || abs(abs(sx) - 1f) > 1e-4f || abs(abs(sy) - 1f) > 1e-4f) return
         val m = matrix()
         cx += Math.round(m[4]) - m[4]
@@ -192,12 +221,25 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     fun flip(horizontal: Boolean) {
-        if (horizontal) sx = -sx else sy = -sy
+        if (distort) {
+            // 모서리 순서를 바꿔 뒤집음
+            val q = quad.copyOf()
+            val order = if (horizontal) intArrayOf(1, 0, 3, 2) else intArrayOf(3, 2, 1, 0)
+            for (i in 0 until 4) { quad[i * 2] = q[order[i] * 2]; quad[i * 2 + 1] = q[order[i] * 2 + 1] }
+        } else if (horizontal) sx = -sx else sy = -sy
         publish()
     }
 
     fun rotateBy(rad: Float) {
-        rot += rad
+        if (distort) {
+            val ccx = (quad[0] + quad[2] + quad[4] + quad[6]) / 4f
+            val ccy = (quad[1] + quad[3] + quad[5] + quad[7]) / 4f
+            val c = cos(rad); val s = sin(rad)
+            for (i in 0 until 4) {
+                val x = quad[i * 2] - ccx; val y = quad[i * 2 + 1] - ccy
+                quad[i * 2] = ccx + c * x - s * y; quad[i * 2 + 1] = ccy + s * x + c * y
+            }
+        } else rot += rad
         publish()
     }
 
@@ -212,12 +254,17 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     private fun publish() {
-        listener?.onTransformChanged(matrix())
+        listener?.onTransformChanged(if (distort) homography() else matrix())
         invalidate()
     }
 
     /** 로컬 (u,v) → 화면 */
     private fun localToScreen(u: Float, v: Float, out: FloatArray) {
+        if (distort) {
+            kr.dfluid.paint.engine.Homography.map(homography(), u, v, out)
+            viewport.toScreen(out[0], out[1], out)
+            return
+        }
         val m = matrix()
         viewport.toScreen(m[0] * u + m[2] * v + m[4], m[1] * u + m[3] * v + m[5], out)
     }
@@ -228,7 +275,7 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER && stylusSeen()) return false
-                grab = hitTest(e.x, e.y)
+                grab = if (distort) hitDistort(e.x, e.y) else hitTest(e.x, e.y)
                 if (grab == Grab.NONE) return false
                 lastX = e.x; lastY = e.y
                 viewport.toScreen(cx, cy, tmp)
@@ -277,7 +324,29 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
         return if (distScreen < Ui.dp(context, 80f)) Grab.ROTATE else Grab.NONE
     }
 
+    /** 자유 모서리 모드: 모서리 = 그 점만, 변 가운데 = 두 모서리, 안쪽 = 전체 이동 */
+    private fun hitDistort(x: Float, y: Float): Grab {
+        for (i in 0 until 4) {
+            viewport.toScreen(quad[i * 2], quad[i * 2 + 1], tmp)
+            if (hypot(x - tmp[0], y - tmp[1]) < touchR) { gi = i; return Grab.CORNER }
+        }
+        for (i in 0 until 4) {
+            val j = (i + 1) % 4
+            viewport.toScreen((quad[i * 2] + quad[j * 2]) / 2f, (quad[i * 2 + 1] + quad[j * 2 + 1]) / 2f, tmp)
+            if (hypot(x - tmp[0], y - tmp[1]) < touchR) { gi = i; return Grab.EDGE }
+        }
+        val local = screenToLocal(x, y)
+        return if (local[0] in 0f..tw && local[1] in 0f..th) Grab.MOVE else Grab.NONE
+    }
+
     private fun screenToLocal(x: Float, y: Float): FloatArray {
+        if (distort) {
+            viewport.toCanvas(x, y, tmp)
+            val inv = kr.dfluid.paint.engine.Homography.invert(homography()) ?: return floatArrayOf(-1f, -1f)
+            val out = FloatArray(2)
+            kr.dfluid.paint.engine.Homography.map(inv, tmp[0], tmp[1], out)
+            return out
+        }
         viewport.toCanvas(x, y, tmp)
         val m = matrix()
         val det = m[0] * m[3] - m[2] * m[1]
@@ -287,6 +356,25 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
     }
 
     private fun drag(x: Float, y: Float) {
+        if (distort) {
+            val a = FloatArray(2); val b = FloatArray(2)
+            viewport.toCanvas(lastX, lastY, a)
+            viewport.toCanvas(x, y, b)
+            val dx = b[0] - a[0]; val dy = b[1] - a[1]
+            when (grab) {
+                Grab.MOVE -> for (i in 0 until 4) { quad[i * 2] += dx; quad[i * 2 + 1] += dy }
+                Grab.CORNER -> { quad[gi * 2] += dx; quad[gi * 2 + 1] += dy }
+                Grab.EDGE -> {
+                    val j = (gi + 1) % 4
+                    quad[gi * 2] += dx; quad[gi * 2 + 1] += dy
+                    quad[j * 2] += dx; quad[j * 2 + 1] += dy
+                }
+                else -> return
+            }
+            lastX = x; lastY = y
+            publish()
+            return
+        }
         when (grab) {
             Grab.MOVE -> {
                 val a = FloatArray(2); val b = FloatArray(2)
@@ -500,7 +588,9 @@ class OverlayView(context: Context, private val viewport: Viewport) : View(conte
             canvas.drawCircle(tmp[0], tmp[1], handleR, handleFill)
             canvas.drawCircle(tmp[0], tmp[1], handleR, handleStroke)
         }
-        viewport.toScreen(cx, cy, tmp)
-        canvas.drawCircle(tmp[0], tmp[1], handleR / 2, handleStroke)
+        if (!distort) {
+            viewport.toScreen(cx, cy, tmp)
+            canvas.drawCircle(tmp[0], tmp[1], handleR / 2, handleStroke)
+        }
     }
 }

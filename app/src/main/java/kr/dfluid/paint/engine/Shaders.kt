@@ -55,6 +55,25 @@ void main() {
 """
 
     /**
+     * 떠 있는 픽셀을 원근 행렬로 캔버스에 (자유 변형의 원근·자유 모서리 모드).
+     * clip = (p.xy/캔버스·2 − w, 0, w)로 두면 GPU가 v_uv를 원근 보정해 보간합니다.
+     */
+    const val PROJ_VS = """#version 300 es
+layout(location = 0) in vec2 a_pos;
+uniform mat3 u_h;
+uniform vec2 u_size;
+uniform vec2 u_canvas;
+out vec2 v_uv;
+out vec2 v_cuv;
+void main() {
+    vec3 p = u_h * vec3(a_pos * u_size, 1.0);
+    v_uv = a_pos;
+    v_cuv = p.xy / p.z / u_canvas;
+    gl_Position = vec4(p.xy / u_canvas * 2.0 - p.z, 0.0, p.z);
+}
+"""
+
+    /**
      * 텍스처 복사 (+불투명도, +선택 마스크).
      * u_maskMode: 0 없음, 1 마스크 안만, 2 마스크 밖만
      */

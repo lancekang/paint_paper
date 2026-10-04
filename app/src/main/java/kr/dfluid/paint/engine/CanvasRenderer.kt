@@ -210,17 +210,19 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
         class Transform(val floating: RenderTarget, val bounds: IRect, var m: FloatArray, val whole: Boolean) : Op() {
             var lastRect: IRect = bounds
+            /** 원근·자유 모서리 모드의 행렬 (행 우선 9개). null이면 [m] (아핀) */
+            var h: FloatArray? = null
+            /** 지금 쓰는 원근 행렬 (아핀도 이 형식으로) */
+            val hm: FloatArray get() = h ?: Homography.fromAffine(m)
+            /** 마스크 떠 있는 픽셀의 원근 행렬 */
+            fun maskH(): FloatArray? {
+                val mb = maskBounds ?: return null
+                return Homography.preTranslate(hm, (mb.x - bounds.x).toFloat(), (mb.y - bounds.y).toFloat())
+            }
             /** 레이어를 옮길 때 함께 옮기는 마스크 (마스크 편집 중이 아니고 마스크가 있을 때) */
             var maskFloating: RenderTarget? = null
             var maskBounds: IRect? = null
 
-            /** 마스크 떠 있는 픽셀의 행렬: 레이어 행렬에 두 경계의 차이만큼 평행이동을 더함 */
-            fun maskMatrix(): FloatArray? {
-                val mb = maskBounds ?: return null
-                val dx = (mb.x - bounds.x).toFloat()
-                val dy = (mb.y - bounds.y).toFloat()
-                return floatArrayOf(m[0], m[1], m[2], m[3], m[4] + m[0] * dx + m[2] * dy, m[5] + m[1] * dx + m[3] * dy)
-            }
         }
 
         /**
@@ -1135,11 +1137,16 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
 
     fun beginTransform() = post { beginTransformGl() }
 
-    /** m = [a,b,c,d,tx,ty] : 떠 있는 픽셀의 로컬 px → 캔버스 px */
+    /** m = [a,b,c,d,tx,ty] : 떠 있는 픽셀의 로컬 px → 캔버스 px. 9개면 원근 행렬 ([Homography]). */
     fun setTransform(m: FloatArray) = post {
         val o = op as? Op.Transform ?: return@post
         val d = doc ?: return@post
-        o.m = m
+        if (m.size >= 9) {
+            o.h = m
+        } else {
+            o.m = m
+            o.h = null
+        }
         val r = transformedRect(o, d) ?: o.bounds
         markDirty(r.union(o.lastRect))
         o.lastRect = r
@@ -2210,14 +2217,19 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         return IRect(minX, minY, maxX - minX + 1, maxY - minY + 1)
     }
 
-    private fun transformedRect(o: Op.Transform, d: Document): IRect? = transformedRect(o.bounds, o.m, d)
+    private fun transformedRect(o: Op.Transform, d: Document): IRect? = transformedRect(o.bounds, o.hm, d)
 
-    private fun transformedRect(bounds: IRect, m: FloatArray, d: Document): IRect? {
+    /** hm = 원근 행렬 (행 우선 9개) */
+    private fun transformedRect(bounds: IRect, hm: FloatArray, d: Document): IRect? {
         val w = bounds.w.toFloat()
         val h = bounds.h.toFloat()
-        val xs = floatArrayOf(m[4], m[0] * w + m[4], m[2] * h + m[4], m[0] * w + m[2] * h + m[4])
-        val ys = floatArrayOf(m[5], m[1] * w + m[5], m[3] * h + m[5], m[1] * w + m[3] * h + m[5])
-        return IRect.ofBounds(xs.min() - 2, ys.min() - 2, xs.max() + 2, ys.max() + 2, d.width, d.height)
+        val p = FloatArray(2)
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        for ((u, v) in listOf(0f to 0f, w to 0f, w to h, 0f to h)) {
+            Homography.map(hm, u, v, p)
+            l = min(l, p[0]); r = max(r, p[0]); t = min(t, p[1]); b = max(b, p[1])
+        }
+        return IRect.ofBounds(l - 2, t - 2, r + 2, b + 2, d.width, d.height)
     }
 
     private fun commitTransformGl(o: Op.Transform, d: Document) {
@@ -2226,7 +2238,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (n == null || s == null) {
             endTransform(o); return
         }
-        val saved = placeFloating(s, o.floating, o.bounds, o.m, o.whole, d)
+        val saved = placeFloating(s, o.floating, o.bounds, o.hm, o.whole, d)
         val parts = ArrayList<HistoryCommand>()
         if (saved.isNotEmpty()) parts.add(TilesCommand(editId(n), saved))
         // 함께 옮긴 마스크
@@ -2234,18 +2246,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val mb = o.maskBounds
         val ms = surfaces[-n.id]
         if (mf != null && mb != null && ms != null) {
-            val ms2 = placeFloating(ms, mf, mb, o.maskMatrix()!!, o.whole, d)
+            val ms2 = placeFloating(ms, mf, mb, o.maskH()!!, o.whole, d)
             if (ms2.isNotEmpty()) parts.add(TilesCommand(-n.id, ms2))
             thumbQueue.add(-n.id)
         }
         // 벡터 레이어: 선 데이터도 같은 행렬로 옮기고 선명하게 다시 그림 (선택 영역만 옮기면 일반 레이어로 굳힘)
         if (n.props.vector && !isMaskEdit(n)) {
             val old = vectors[n.id] ?: emptyList()
-            if (hasSelection) {
+            if (hasSelection || o.h != null) {
                 val before = d.shape()
                 n.props = n.props.copy(vector = false)
                 parts.add(StructureCommand(before, d.shape(), n.id, n.id))
-                reportError("선택 영역만 변형해 벡터 레이어가 일반 레이어로 바뀌었습니다.")
+                reportError(if (o.h != null) "원근 변형이라 벡터 레이어가 일반 레이어로 바뀌었습니다." else "선택 영역만 변형해 벡터 레이어가 일반 레이어로 바뀌었습니다.")
                 notifyLayers()
             } else if (old.isNotEmpty()) {
                 val m = o.m
@@ -2266,7 +2278,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         n.props.text?.let { t ->
             val before = d.shape()
             val m = o.m
-            val pure = !hasSelection && !isMaskEdit(n) && m[0] == 1f && m[1] == 0f && m[2] == 0f && m[3] == 1f
+            val pure = o.h == null && !hasSelection && !isMaskEdit(n) && m[0] == 1f && m[1] == 0f && m[2] == 0f && m[3] == 1f
             n.props = n.props.copy(text = if (pure) t.copy(x = t.x + m[4] - o.bounds.x, y = t.y + m[5] - o.bounds.y) else null)
             parts.add(StructureCommand(before, d.shape(), n.id, n.id))
             notifyLayers()
@@ -2274,7 +2286,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         if (hasSelection) {
             val before = selEncoded
             val am = Matrix()
-            am.setValues(floatArrayOf(o.m[0], o.m[2], o.m[4], o.m[1], o.m[3], o.m[5], 0f, 0f, 1f))
+            am.setValues(o.hm.copyOf())
             am.preTranslate(-o.bounds.x.toFloat(), -o.bounds.y.toFloat())
             selection!!.transform(am)
             uploadSelection()
@@ -2291,8 +2303,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
      * 떠 있는 픽셀을 [s]에 내려놓습니다: 들어 올린 자리를 지우고(whole이면 전부, 아니면 선택 영역만) 변형해 그립니다.
      * 바뀐 타일의 이전 내용을 돌려줍니다 (실행취소용).
      */
-    private fun placeFloating(s: TileSurface, floating: RenderTarget, bounds: IRect, m: FloatArray, whole: Boolean, d: Document): HashMap<Int, ByteBuffer?> {
-        val target = transformedRect(bounds, m, d)
+    private fun placeFloating(s: TileSurface, floating: RenderTarget, bounds: IRect, hm: FloatArray, whole: Boolean, d: Document): HashMap<Int, ByteBuffer?> {
+        val target = transformedRect(bounds, hm, d)
         val rect = bounds.union(target)
         val saved = HashMap<Int, ByteBuffer?>()
         val sel = selTexIfAny()
@@ -2322,7 +2334,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     s.scissorCanvasRect(key, r)
                     // 변형은 투명 픽셀 잠금과 상관없이 옮깁니다 (잠금이면 들어 올린 자리가 비어 아무것도 안 그려짐).
                     GlState.over()
-                    compositor.drawAffine(floating.tex, bounds.w, bounds.h, m, d.width, d.height, 1f)
+                    compositor.drawProjective(floating.tex, bounds.w, bounds.h, hm, d.width, d.height, 1f)
                     GlState.off()
                 }
             }
@@ -3023,7 +3035,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     compositor.drawTile(tile.tex, ms.originX(key), ms.originY(key), d.width, d.height, 1f, selTex!!.tex, 2)
                 }
             }
-            compositor.drawAffine(tr.maskFloating!!.tex, tr.maskBounds!!.w, tr.maskBounds!!.h, tr.maskMatrix()!!, d.width, d.height, 1f)
+            compositor.drawProjective(tr.maskFloating!!.tex, tr.maskBounds!!.w, tr.maskBounds!!.h, tr.maskH()!!, d.width, d.height, 1f)
         } else {
             drawSourceCopy(maskSrc, 1f, r)
         }
@@ -3158,7 +3170,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
                     }
                 }
                 GlState.over()
-                compositor.drawAffine(o.floating.tex, o.bounds.w, o.bounds.h, o.m, d.width, d.height, 1f)
+                compositor.drawProjective(o.floating.tex, o.bounds.w, o.bounds.h, o.hm, d.width, d.height, 1f)
             }
             is Op.Smudge -> compositor.drawCopy(o.work.tex, 1f)
             is Op.VErase -> drawSourceCopy(Src.Tiles(s), 1f, r)
