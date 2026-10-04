@@ -43,6 +43,8 @@ data class LayerProps(
     val reference: Boolean = false,
     /** 텍스트 레이어면 그 내용 (픽셀은 이 값으로 그린 결과). null = 일반 래스터 */
     val text: TextSpec? = null,
+    /** 퀵 마스크 레이어 (알파 = 선택 정도). 끄면 선택 영역으로 바뀌고 사라집니다 */
+    val quickMask: Boolean = false,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

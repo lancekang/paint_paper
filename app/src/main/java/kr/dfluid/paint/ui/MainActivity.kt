@@ -81,6 +81,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private var rulerPlaced = false
     override fun onRulerChanged() = overlay.invalidate()
     private lateinit var symBtn: ImageView
+    private lateinit var quickMaskBtn: ImageView
     private var straightLineOn = false
     override val straightLine: Boolean get() = straightLineOn
     override val shapeKind: Int get() = settings.shapeKind
@@ -415,6 +416,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         group("선택")
         act(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM)
         act(R.drawable.ic_deselect, "선택 해제", Action.SELECT_NONE)
+        quickMaskBtn = barBtn(R.drawable.ic_quick_mask, "퀵 마스크 (선택 영역을 붓·지우개로 칠해서 고침)", Action.SELECT_QUICK_MASK) { toggleQuickMask() }
+        Ui.setOn(quickMaskBtn, lastNodes.any { it.props.quickMask })
         viewLabel = group("보기")
         act(R.drawable.ic_view_fit, "화면에 맞춤", Action.VIEW_FIT)
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
@@ -899,7 +902,16 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.HOLD_EYEDROPPER -> HoldMode.EYEDROPPER
             else -> HoldMode.NONE
         }
-    override val brushColor: Int get() = settings.primaryColor
+    /** 퀵 마스크 레이어에 그릴 때는 주색과 상관없이 빨강 (선택 정도 = 알파) */
+    override val brushColor: Int
+        get() = if (lastNodes.firstOrNull { it.id == lastActiveId }?.props?.quickMask == true) 0xFFF22633.toInt() else settings.primaryColor
+
+    private fun toggleQuickMask() {
+        if (transforming) commitTransform()
+        val on = lastNodes.any { it.props.quickMask }
+        showHud(if (on) "퀵 마스크 끔 · 칠한 곳이 선택 영역이 됩니다" else "퀵 마스크 · 칠하면 선택, 지우면 해제")
+        renderer.toggleQuickMask()
+    }
     override val smoothing: Float get() = settings.smoothing
     override val pressureGamma: Float get() = settings.pressureGamma
     override val drawWithFinger: Boolean get() = settings.drawWithFinger
@@ -1103,6 +1115,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             showHud(if (maskEditing) "마스크 편집 · 그리기 = 보이기, 지우개 = 가리기" else "레이어 편집")
         }
         layerPanel.update(nodes, activeId, liveRasterIds)
+        if (::quickMaskBtn.isInitialized) Ui.setOn(quickMaskBtn, nodes.any { it.props.quickMask })
         updateTitle()
     }
 
@@ -1386,6 +1399,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.SELECT_ALL -> renderer.selectAll()
             Action.SELECT_NONE -> renderer.deselect()
             Action.SELECT_INVERT -> renderer.invertSelection()
+            Action.SELECT_QUICK_MASK -> toggleQuickMask()
             Action.LAYER_NEW -> renderer.addLayer()
             Action.LAYER_FOLDER -> renderer.addFolder()
             Action.LAYER_GROUP -> renderer.groupActive()

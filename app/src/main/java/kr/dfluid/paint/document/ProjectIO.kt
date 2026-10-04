@@ -59,6 +59,7 @@ object ProjectIO {
                     .put("expanded", n.props.expanded)
                     .put("reference", n.props.reference)
                 n.props.text?.let { o.put("text", it.toJson()) }
+                if (n.props.quickMask) o.put("quickMask", true)
                 if (n.kind == NodeKind.RASTER) o.put("file", "layers/${n.id}.png")
                 if (n.kind == NodeKind.RASTER && n.props.mask) {
                     o.put("mask", true).put("maskEnabled", n.props.maskEnabled).put("maskFile", "layers/${n.id}_mask.png")
@@ -191,6 +192,7 @@ object ProjectIO {
         maskEnabled = o.optBoolean("maskEnabled", true),
         reference = o.optBoolean("reference", false),
         text = TextSpec.fromJson(o.optJSONObject("text")),
+        quickMask = o.optBoolean("quickMask", false),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

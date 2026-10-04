@@ -752,6 +752,79 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         commitSelectionChange(before)
     }
 
+    /**
+     * 퀵 마스크 켜기/끄기. 켜면 선택 영역을 맨 위 반투명 "퀵 마스크" 레이어(빨강)로 옮기고 선택을 풉니다.
+     * 그 레이어에 붓·지우개로 칠한 뒤 끄면 레이어의 알파가 선택 영역이 되고 레이어는 사라집니다. 각각 실행취소 한 단계.
+     */
+    fun toggleQuickMask() = post {
+        finishOp()
+        val d = doc ?: return@post
+        if (op != null) return@post
+        val qm = d.allNodes().firstOrNull { it.isRaster && it.props.quickMask }
+        if (qm == null) enterQuickMask(d) else exitQuickMask(d, qm)
+    }
+
+    /** 퀵 마스크를 끄면 돌아갈 레이어 (켜기 전 활성 레이어) */
+    private var quickMaskReturnId = 0
+
+    private fun enterQuickMask(d: Document) {
+        val before = d.shape()
+        val activeBefore = d.activeId
+        quickMaskReturnId = activeBefore
+        val n = Node(d.newId(), NodeKind.RASTER, LayerProps("퀵 마스크", opacity = 0.5f, quickMask = true))
+        insert(d.root, d.root.children.size, n)
+        val struct = StructureCommand(before, d.shape(), activeBefore, n.id)
+        struct.redo(this) // surface를 만들고 활성으로
+        maskEditing = false
+        val parts = ArrayList<HistoryCommand>()
+        parts.add(struct)
+        val r = selBounds
+        val s = surfaces[n.id]
+        if (hasSelection && r != null && s != null) {
+            // 새 레이어라 TilesCommand는 필요 없음 (실행취소하면 StructureCommand가 픽셀을 보관)
+            for (key in s.keysIntersecting(r)) {
+                val tr = r.intersect(s.tileRect(key)) ?: continue
+                val t = s.getOrCreate(key)
+                s.bindCanvasSpace(key, t)
+                s.scissorCanvasRect(key, tr)
+                GlState.over()
+                compositor.drawMergeCoverage(selTex!!.tex, QUICK_MASK, 1f, 0, d.width, d.height)
+                GlState.off()
+                GlState.noScissor()
+                s.dropIfEmpty(key)
+            }
+            val selBefore = selEncoded
+            selection?.clear()
+            uploadSelection()
+            parts.add(SelectionCommand(selBefore, selEncoded))
+        }
+        history.push(CompoundCommand(parts))
+        thumbQueue.add(n.id)
+        afterEdit()
+    }
+
+    private fun exitQuickMask(d: Document, qm: Node) {
+        val rgba = referenceImage(d, qm, FillOptions.REF_CURRENT)
+        val alpha = ByteArray(d.width * d.height)
+        for (i in alpha.indices) alpha[i] = rgba.get(i * 4 + 3)
+        val selBefore = selEncoded
+        val m = selection ?: SelectionMask(d.width, d.height).also { selection = it }
+        m.clear()
+        m.applyMask(alpha, SelOp.REPLACE)
+        uploadSelection()
+        val selCmd = SelectionCommand(selBefore, selEncoded)
+        val before = d.shape()
+        val activeBefore = d.activeId
+        val parent = qm.parent ?: d.root
+        parent.children.remove(qm)
+        val next = d.find(quickMaskReturnId)?.id ?: d.allNodes().lastOrNull { it.isRaster }?.id ?: 0
+        val struct = StructureCommand(before, d.shape(), activeBefore, next)
+        struct.redo(this)
+        history.push(CompoundCommand(listOf(selCmd, struct)))
+        afterEdit()
+        requestRender()
+    }
+
     fun invertSelection() = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
@@ -2763,6 +2836,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         private const val TAG = "DFPaint"
         private const val THUMB = 96
         private val WHITE = floatArrayOf(1f, 1f, 1f, 1f)
+        /** 퀵 마스크 색 (프리멀티플라이드 빨강) */
+        private val QUICK_MASK = floatArrayOf(0.95f, 0.15f, 0.2f, 1f)
 
         /** sRGB 색 + 알파 → 프리멀티플라이드 float4 */
         fun premul(color: Int, alpha: Float): FloatArray = floatArrayOf(

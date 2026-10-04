@@ -97,6 +97,8 @@ const icons = {
   redo: ['M15,14l5,-5l-5,-5', 'M20,9H9.5a5.5,5.5 0 0,0 0,11H13'],
   transform: [rect(2, 2, 4, 4), rect(18, 2, 4, 4), rect(2, 18, 4, 4), rect(18, 18, 4, 4), 'M6,4h12M6,20h12M4,6v12M20,6v12'],
   deselect: [dashedRect, 'M9,9l6,6M15,9l-6,6'],
+  // 퀵 마스크: 점선 사각형 안에 채운 원
+  quick_mask: [dashedRect, { d: circle(12, 12, 4.5), fill: true }],
   view_fit: ['M8,3H5a2,2 0 0,0 -2,2v3', 'M21,8V5a2,2 0 0,0 -2,-2h-3', 'M3,16v3a2,2 0 0,0 2,2h3', 'M16,21h3a2,2 0 0,0 2,-2v-3', rect(8, 8, 8, 8, 1)],
   view_rotate_reset: ['M3,12a9,9 0 1,0 9,-9a9.75,9.75 0 0,0 -6.74,2.74L3,8', 'M3,3v5h5'],
   view_flip: ['M3,7l5,5l-5,5V7', 'M21,7l-5,5l5,5V7', 'M12,20v2M12,14v2M12,8v2M12,2v2'],
