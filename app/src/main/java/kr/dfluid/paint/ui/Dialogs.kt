@@ -64,7 +64,7 @@ object Dialogs {
                 topMargin = Ui.dp(ctx, 12f)
             })
         }
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle("색 선택")
             .setView(root)
             .setPositiveButton("확인") { _, _ -> onPick(picker.color) }
@@ -166,7 +166,7 @@ object Dialogs {
             })
             addView(note)
         }
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle("새 캔버스")
             .setView(root)
             .setPositiveButton("만들기") { _, _ ->
@@ -183,7 +183,7 @@ object Dialogs {
             .show()
     }
 
-    fun settings(ctx: Context, s: AppSettings, onChanged: () -> Unit, onOpenShortcuts: () -> Unit) {
+    fun settings(ctx: Context, s: AppSettings, onChanged: () -> Unit, onOpenShortcuts: () -> Unit, onThemeChanged: () -> Unit) {
         val pad = Ui.dp(ctx, 20f)
         // 감마 0.3 ~ 3.0 을 로그 스케일 슬라이더로
         val gamma = Ui.SliderRow(ctx, "필압 곡선", 100)
@@ -215,9 +215,34 @@ object Dialogs {
             "제스처: 두 손가락 탭 = 실행취소 · 세 손가락 탭 = 다시실행 · 펜 옆 버튼 = 스포이드 · 펜 뒤쪽(지우개) = 지우개",
             12f, Ui.SUBTEXT
         )
+        // 화면 테마
+        val themeButtons = ArrayList<View>()
+        val themeRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Ui.text(ctx, "화면 테마", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        listOf("시스템 따라가기", "라이트", "다크").forEachIndexed { i, label ->
+            val b = Ui.button(ctx, label) {
+                if (s.themeMode != i) {
+                    s.themeMode = i
+                    s.save()
+                    themeButtons.forEachIndexed { j, v -> Ui.setOn(v, j == i) }
+                    onThemeChanged()
+                }
+            }
+            Ui.setOn(b, s.themeMode == i)
+            themeButtons.add(b)
+            themeRow.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = Ui.dp(ctx, 6f)
+            })
+        }
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, 0)
+            addView(themeRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = Ui.dp(ctx, 12f)
+            })
             addView(gamma.view)
             addView(finger, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = Ui.dp(ctx, 12f)
@@ -226,7 +251,7 @@ object Dialogs {
                 topMargin = Ui.dp(ctx, 12f)
             })
         }
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle("설정")
             .setView(root)
             .setPositiveButton("닫기", null)
@@ -235,7 +260,7 @@ object Dialogs {
     }
 
     fun confirm(ctx: Context, message: String, ok: String, onOk: () -> Unit) {
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setMessage(message)
             .setPositiveButton(ok) { _, _ -> onOk() }
             .setNegativeButton("취소", null)

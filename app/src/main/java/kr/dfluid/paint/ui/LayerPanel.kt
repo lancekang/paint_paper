@@ -1,6 +1,5 @@
 package kr.dfluid.paint.ui
 
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -8,7 +7,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -35,63 +33,54 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     private val thumbViews = HashMap<Int, ImageView>()
 
     private val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-    private val opacity = Ui.SliderRow(ctx, "불투명도", 100)
+    private val opacity = Ui.SliderRow(ctx, "", 100)
     private val blend = Spinner(ctx).apply { isFocusable = false }
     private val clipBtn = icon(R.drawable.ic_clip, "아래 레이어에서 클리핑", Action.LAYER_CLIP) { toggle { it.copy(clip = !it.clip) } }
     private val lockBtn = icon(R.drawable.ic_alpha_lock, "투명 픽셀 잠금", Action.LAYER_ALPHA_LOCK) { toggle { it.copy(alphaLock = !it.alphaLock) } }
+    private val maskBtn = icon(R.drawable.ic_mask, "레이어 마스크 (없으면 추가, 있으면 메뉴)") { maskMenu() }
 
     private fun icon(res: Int, tip: String, action: Action? = null, onClick: () -> Unit) =
-        tips.bind(Ui.iconButton(ctx, res, tip, 36f, onClick), tip, action)
+        tips.bind(Ui.iconButton(ctx, res, tip, 34f, ghost = true, onClick = onClick), tip, action)
 
     private val active: NodeInfo? get() = nodes.firstOrNull { it.id == activeId }
 
+    /** 레이어 카드 머리글에 둘 버튼: 자주 쓰는 것만 (새 레이어, 새 폴더, 더보기). */
+    val headerActions: List<ImageView> = listOf(
+        icon(R.drawable.ic_layer_add, "새 레이어", Action.LAYER_NEW) { renderer.addLayer() },
+        icon(R.drawable.ic_folder_add, "새 폴더", Action.LAYER_FOLDER) { renderer.addFolder() },
+        icon(R.drawable.ic_more, "더보기 (순서 이동, 지우기, 폴더로 묶기, 이름 바꾸기)") { moreMenu() },
+    )
+
+    /** 카드 본문: 합성 모드·불투명도 한 줄 → 목록 → 아래 도구줄. */
     val view: LinearLayout = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
-        addView(Ui.text(ctx, "레이어", 14f, bold = true))
-
-        fun row(vararg items: View): LinearLayout {
-            val r = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            for (b in items) {
-                r.addView(b, LinearLayout.LayoutParams(0, Ui.dp(ctx, 36f), 1f).apply {
-                    rightMargin = Ui.dp(ctx, 3f)
-                })
-            }
-            return r
-        }
-        val lp = { top: Float ->
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = Ui.dp(ctx, top)
-            }
-        }
-        addView(row(
-            icon(R.drawable.ic_layer_add, "새 레이어", Action.LAYER_NEW) { renderer.addLayer() },
-            icon(R.drawable.ic_folder_add, "새 폴더", Action.LAYER_FOLDER) { renderer.addFolder() },
-            icon(R.drawable.ic_duplicate, "복제", Action.LAYER_DUPLICATE) { renderer.duplicate() },
-            icon(R.drawable.ic_trash, "삭제") { renderer.deleteNode() },
-            icon(R.drawable.ic_arrow_up, "위로 이동") { renderer.moveNode(+1) },
-            icon(R.drawable.ic_mask, "레이어 마스크 (없으면 추가, 있으면 메뉴)") { maskMenu() },
-        ), lp(8f))
-        addView(row(
-            icon(R.drawable.ic_arrow_down, "아래로 이동") { renderer.moveNode(-1) },
-            icon(R.drawable.ic_merge_down, "아래 레이어와 병합", Action.LAYER_MERGE_DOWN) { renderer.mergeDown() },
-            icon(R.drawable.ic_layer_clear, "레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR) { renderer.clearLayer() },
-            clipBtn,
-            lockBtn,
-            icon(R.drawable.ic_group, "폴더로 묶기", Action.LAYER_GROUP) { renderer.groupActive() },
-        ), lp(4f))
-        addView(opacity.view, lp(8f))
         addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(Ui.text(ctx, "합성 모드", 12f, Ui.SUBTEXT), LinearLayout.LayoutParams(Ui.dp(ctx, 64f), ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(blend, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(blend, LinearLayout.LayoutParams(0, Ui.dp(ctx, 32f), 1f))
+            addView(opacity.view, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f).apply {
+                leftMargin = Ui.dp(ctx, 6f)
+            })
         })
         addView(ScrollView(ctx).apply {
             isFillViewport = true
             addView(list)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
-            topMargin = Ui.dp(ctx, 8f)
+            topMargin = Ui.dp(ctx, 6f)
         })
+        addView(View(ctx).apply { setBackgroundColor(Ui.DIVIDER) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 1f)).apply {
+            topMargin = Ui.dp(ctx, 4f); bottomMargin = Ui.dp(ctx, 4f)
+        })
+        val tools = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for (b in listOf(
+            clipBtn, lockBtn, maskBtn,
+            icon(R.drawable.ic_merge_down, "아래 레이어와 병합", Action.LAYER_MERGE_DOWN) { renderer.mergeDown() },
+            icon(R.drawable.ic_duplicate, "복제", Action.LAYER_DUPLICATE) { renderer.duplicate() },
+            icon(R.drawable.ic_trash, "삭제") { renderer.deleteNode() },
+        )) {
+            tools.addView(b, LinearLayout.LayoutParams(0, Ui.dp(ctx, 34f), 1f))
+        }
+        addView(tools, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     init {
@@ -106,6 +95,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        Ui.setTip(blend, "합성 모드")
+        Ui.setTip(opacity.seek, "레이어 불투명도")
         opacity.onStart = { dragStartProps = active?.props }
         opacity.onChange = { p ->
             val base = dragStartProps ?: active?.props
@@ -128,9 +119,31 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
     private fun setBlendChoices(choices: List<BlendMode>) {
         if (choices == blendChoices && blend.adapter != null) return
         blendChoices = choices
-        blend.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_item, choices.map { it.label }).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
+        Ui.styleSpinner(blend, choices.map { it.label })
+    }
+
+    /** 자주 쓰지 않는 레이어 동작. */
+    private fun moreMenu() {
+        val info = active ?: return
+        val items = arrayOf(
+            "위로 이동", "아래로 이동",
+            tips.text("레이어 지우기 (선택 영역이 있으면 그 안만)", Action.LAYER_CLEAR),
+            tips.text("폴더로 묶기", Action.LAYER_GROUP),
+            "이름 바꾸기",
+        )
+        Ui.dialog(ctx)
+            .setTitle(info.props.name)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> renderer.moveNode(+1)
+                    1 -> renderer.moveNode(-1)
+                    2 -> renderer.clearLayer()
+                    3 -> renderer.groupActive()
+                    4 -> rename(info)
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun toggle(change: (LayerProps) -> LayerProps) {
@@ -157,6 +170,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             Ui.setOn(clipBtn, cur.props.clip)
             Ui.setOn(lockBtn, cur.props.alphaLock)
             Ui.setEnabled(lockBtn, raster)
+            Ui.setEnabled(maskBtn, raster)
+            Ui.setOn(maskBtn, cur.props.mask)
         }
         rebuildList()
     }
@@ -189,6 +204,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         }
         row.addView(ImageView(ctx).apply {
             setImageResource(if (p.visible) R.drawable.ic_eye else R.drawable.ic_eye_off)
+            Ui.tint(this, if (p.visible) Ui.TEXT else Ui.MUTED)
             val pad = Ui.dp(ctx, 5f)
             setPadding(pad, pad, pad, pad)
             isClickable = true
@@ -201,6 +217,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         if (folder) {
             row.addView(ImageView(ctx).apply {
                 setImageResource(if (p.expanded) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right)
+                Ui.tint(this, Ui.SUBTEXT)
                 val pad = Ui.dp(ctx, 4f)
                 setPadding(pad, pad, pad, pad)
                 isClickable = true
@@ -210,7 +227,9 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         } else {
             val size = Ui.dp(ctx, 36f)
             val img = ImageView(ctx).apply {
-                setBackgroundColor(Color.WHITE)
+                background = Ui.rounded(Color.WHITE, 0f, Ui.dp(ctx, 1f), Ui.BORDER)
+                val pad = Ui.dp(ctx, 1f)
+                setPadding(pad, pad, pad, pad)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 thumbs[info.id]?.let { setImageBitmap(it) }
             }
@@ -229,7 +248,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     thumbs[-info.id]?.let { setImageBitmap(it) }
                     val pad = Ui.dp(ctx, 2f)
                     setPadding(pad, pad, pad, pad)
-                    background = Ui.rounded(Color.WHITE, 0f, Ui.dp(ctx, 2f), if (editingMask) Ui.BUTTON_ON else Color.GRAY)
+                    background = Ui.rounded(Color.WHITE, 0f, Ui.dp(ctx, 2f), if (editingMask) Ui.BUTTON_ON else Ui.BORDER)
                     alpha = if (p.maskEnabled) 1f else 0.4f
                     isClickable = true
                     Ui.setTip(this, if (p.maskEnabled) "마스크 편집 (흰색 = 보임, 검정 = 가림)" else "마스크 편집 (마스크 꺼짐)")
@@ -272,7 +291,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             "마스크 적용 (가린 부분을 실제로 지움)",
             "마스크 삭제",
         )
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle("레이어 마스크")
             .setItems(items) { _, which ->
                 when (which) {
@@ -291,7 +310,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             setText(info.props.name)
             setSelectAllOnFocus(true)
         }
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle(if (info.kind == NodeKind.FOLDER) "폴더 이름" else "레이어 이름")
             .setView(input)
             .setPositiveButton("확인") { _, _ ->

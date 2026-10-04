@@ -22,11 +22,11 @@ class PressureCurveView(context: Context) : View(context) {
         }
     var onChanged: ((FloatArray) -> Unit)? = null
 
-    private val grid = Paint().apply { color = 0xFF3A3C41.toInt(); strokeWidth = 1f }
+    private val grid = Paint().apply { color = Ui.DIVIDER; strokeWidth = 1f }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF3D8BFF.toInt(); strokeWidth = Ui.dp(context, 2.5f).toFloat(); style = Paint.Style.STROKE
     }
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Ui.TEXT }
     private val pad = Ui.dp(context, 12f).toFloat()
     private val hit = Ui.dp(context, 20f).toFloat()
     private var dragging = -1
@@ -44,7 +44,7 @@ class PressureCurveView(context: Context) : View(context) {
     private fun vy(py: Float) = ((height - pad - py) / (height - 2 * pad)).coerceIn(0f, 1f)
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(0xFF1F2023.toInt())
+        canvas.drawColor(Ui.CARD_HEAD)
         for (i in 0..4) {
             val t = i / 4f
             canvas.drawLine(sx(t), sy(0f), sx(t), sy(1f), grid)

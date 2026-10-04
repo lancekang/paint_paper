@@ -1,6 +1,5 @@
 package kr.dfluid.paint.ui
 
-import android.app.AlertDialog
 import android.content.Context
 import android.view.Gravity
 import android.view.View
@@ -40,6 +39,12 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
     private var smoothingRow: Ui.SliderRow? = null
     private val recentRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
 
+    /** 카드 머리글 제목 (MainActivity가 연결). 없으면 본문 맨 위에 제목을 넣습니다. */
+    var titleView: TextView? = null
+
+    /** 경도·손떨림 보정 같은 세부 설정 펼침 */
+    private var detailsOpen = false
+
     /** 최근 색: 옵션이 길어져도 가려지지 않게 스크롤 밖(패널에 고정)에 둡니다. */
     val recentView: LinearLayout = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
@@ -61,7 +66,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
     private fun rebuild() {
         view.removeAllViews()
         sizeRow = null; opacityRow = null; hardnessRow = null; smoothingRow = null
-        view.addView(Ui.text(ctx, if (tool.isBrush) "보조 도구 · ${tool.label}" else tool.label, 14f, bold = true))
+        val title = if (tool.isBrush) "보조 도구 · ${tool.label}" else "도구 속성 · ${tool.label}"
+        titleView?.let { it.text = title } ?: view.addView(Ui.text(ctx, title, 14f, bold = true))
         when {
             tool.isBrush -> buildBrush()
             tool == Tool.SELECT -> buildSelect()
@@ -100,12 +106,24 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val lib = host.library
         val list = lib.list(tool)
         val active = lib.active(tool)
+        // 보조 도구: 3열 칩 (선택 = 강조색). 길게 누르면 메뉴.
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        for (b in list) {
-            val row = Ui.text(ctx, b.name, 13f).apply {
-                val p = Ui.dp(ctx, 8f)
-                setPadding(p, p * 3 / 4, p, p * 3 / 4)
-                background = Ui.rounded(if (b.id == active?.id) Ui.ROW_ON else Ui.BUTTON, Ui.dp(ctx, 6f).toFloat())
+        var line: LinearLayout? = null
+        list.forEachIndexed { i, b ->
+            if (i % 3 == 0) {
+                line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+                box.addView(line, lp(if (i == 0) 0f else 4f))
+            }
+            val on = b.id == active?.id
+            val chip = Ui.text(ctx, b.name, 12f, if (on) Ui.ON_ACCENT else Ui.TEXT).apply {
+                gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                val p = Ui.dp(ctx, 6f)
+                setPadding(p, Ui.dp(ctx, 7f), p, Ui.dp(ctx, 7f))
+                background = if (on) Ui.rounded(Ui.BUTTON_ON, Ui.dp(ctx, 6f).toFloat())
+                else Ui.rounded(Ui.CARD, Ui.dp(ctx, 6f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+                Ui.setTip(this, b.name + " (길게 누르면 메뉴)")
                 isClickable = true
                 setOnClickListener {
                     lib.setActive(tool, b.id)
@@ -115,9 +133,14 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
                 }
                 setOnLongClickListener { presetMenu(b); true }
             }
-            box.addView(row, lp(3f))
+            line!!.addView(chip, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (i % 3 != 2) rightMargin = Ui.dp(ctx, 4f)
+            })
         }
-        view.addView(box, lp(6f))
+        // 마지막 줄 빈 칸 채우기 (칩 너비를 맞춤)
+        val rest = (3 - list.size % 3) % 3
+        repeat(rest) { k -> line?.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f).apply { if (k < rest - 1) rightMargin = Ui.dp(ctx, 4f) }) }
+        view.addView(box, lp(2f))
         val actions = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         fun act(label: String, f: () -> Unit) = actions.addView(Ui.button(ctx, label, onClick = f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             rightMargin = Ui.dp(ctx, 4f)
@@ -141,20 +164,40 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         hard.onChange = { p -> lib.active(tool)?.let { it.hardness = p / 100f; refresh() } }
         smooth.onChange = { p -> host.settings.smoothing = p / 100f * 0.95f; refresh() }
         listOf(size, op, hard).forEach { r -> r.onStop = { lib.save() } }
-        for (r in listOf(size, op, hard, smooth)) view.addView(r.view, lp())
+        for (r in listOf(size, op)) view.addView(r.view, lp())
+        // 세부 설정은 접어 둡니다.
+        val details = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (detailsOpen) View.VISIBLE else View.GONE
+            for (r in listOf(hard, smooth)) addView(r.view, lp())
+        }
+        val toggle = Ui.text(ctx, "", 12f, Ui.SUBTEXT).apply {
+            val p = Ui.dp(ctx, 4f)
+            setPadding(0, p, 0, p)
+            isClickable = true
+        }
+        fun label() { toggle.text = if (detailsOpen) "세부 설정 ▴" else "세부 설정 (경도, 손떨림 보정) ▾" }
+        label()
+        toggle.setOnClickListener {
+            detailsOpen = !detailsOpen
+            details.visibility = if (detailsOpen) View.VISIBLE else View.GONE
+            label()
+        }
+        view.addView(toggle, lp(2f))
+        view.addView(details)
         refresh()
     }
 
     private fun presetMenu(b: Brush) {
         val lib = host.library
         val items = arrayOf("이름 바꾸기", "설정…", "복제", "위로", "아래로", "삭제", "이 도구 기본값으로 되돌리기")
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle(b.name)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> {
                         val input = EditText(ctx).apply { setText(b.name); setSelectAllOnFocus(true) }
-                        AlertDialog.Builder(ctx).setTitle("이름").setView(input)
+                        Ui.dialog(ctx).setTitle("이름").setView(input)
                             .setPositiveButton("확인") { _, _ ->
                                 val n = input.text.toString().trim()
                                 if (n.isNotEmpty()) { b.name = n; lib.save(); rebuild() }

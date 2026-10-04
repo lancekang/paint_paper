@@ -117,6 +117,14 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private lateinit var secondarySwatch: View
     private val toolButtons = HashMap<Tool, ImageView>()
     private lateinit var tips: Ui.Tips
+    private lateinit var rootView: FrameLayout
+    private lateinit var toolCard: Ui.Card
+    private lateinit var colorCard: Ui.Card
+    private lateinit var layerCard: Ui.Card
+    private lateinit var colorPicker: ColorPickerView
+    private var lastLiveIds: Set<Int> = emptySet()
+    private var lastCanUndo = false
+    private var lastCanRedo = false
     private val hideHud = Runnable { hud.visibility = View.GONE }
 
     private val autosaveFile: File get() = File(filesDir, "autosave.dfp")
@@ -131,18 +139,23 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         library = BrushLibrary(this)
         shortcuts = ShortcutStore(this)
         dispatcher = ShortcutDispatcher(shortcuts, this)
-        tips = Ui.Tips { a -> shortcuts.get(a).firstOrNull()?.label() }
+        Ui.applyTheme(resolveDark())
         renderer = CanvasRenderer(this)
+        renderer.setBackdrop(Ui.CANVAS_BG)
         renderer.defaultBackground = settings.newCanvasBackground
         canvasView = CanvasView(this, renderer)
         canvasView.host = this
         overlay = OverlayView(this, canvasView.viewport)
         overlay.listener = this
         overlay.stylusSeen = { canvasView.stylusSeen }
-        layerPanel = LayerPanel(this, renderer, tips)
-        toolOptions = ToolOptions(this, this)
 
-        setContentView(buildLayout())
+        // 캔버스와 오버레이는 한 번만 붙이고, 둘레 UI(buildChrome)만 테마 바뀔 때 다시 만듭니다.
+        rootView = FrameLayout(this)
+        val match = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        rootView.addView(canvasView, match)
+        rootView.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(rootView)
+        buildChrome()
         enterImmersive()
         setTool(Tool.PEN)
         updateSwatches()
@@ -258,62 +271,135 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // 레이아웃
     // =====================================================================
 
-    private fun buildLayout(): View {
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.rgb(0x1B, 0x1C, 0x1E)) }
-        val match = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        root.addView(canvasView, match)
-        root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    /** 테마: 설정(시스템/라이트/다크)과 시스템 다크 모드로 결정 */
+    private fun resolveDark(): Boolean = when (settings.themeMode) {
+        AppSettings.THEME_LIGHT -> false
+        AppSettings.THEME_DARK -> true
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
 
-        val m = Ui.dp(this, 8f)
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (settings.themeMode == AppSettings.THEME_SYSTEM && resolveDark() != Ui.dark) rebuildUi()
+    }
 
-        // ---- 상단 바 ----
-        val bar = LinearLayout(this).apply {
+    /**
+     * 테마가 바뀌면 캔버스(GL)는 그대로 두고 주변 UI만 다시 만듭니다.
+     * GLSurfaceView를 떼었다 붙이면 GL 컨텍스트를 잃으므로 절대 떼지 않습니다.
+     */
+    private fun rebuildUi() {
+        val panelOn = rightPanel.visibility == View.VISIBLE
+        val perfOn = perfPanel.visibility == View.VISIBLE
+        val bench = benchText.text
+        Ui.applyTheme(resolveDark())
+        renderer.setBackdrop(Ui.CANVAS_BG)
+        for (i in rootView.childCount - 1 downTo 0) {
+            val v = rootView.getChildAt(i)
+            if (v !== canvasView && v !== overlay) rootView.removeViewAt(i)
+        }
+        buildChrome()
+        rightPanel.visibility = if (panelOn) View.VISIBLE else View.GONE
+        Ui.setOn(panelBtn, panelOn)
+        perfPanel.visibility = if (perfOn) View.VISIBLE else View.GONE
+        Ui.setOn(perfBtn, perfOn)
+        benchText.text = bench
+        if (!uiVisible) {
+            uiVisible = true
+            toggleUi()
+        }
+        setTool(tool)
+        updateSwatches()
+        updateTitle()
+        updateSymmetryButton()
+        Ui.setOn(lineBtn, straightLineOn)
+        onHistoryChanged(lastCanUndo, lastCanRedo)
+        layerPanel.update(lastNodes, lastActiveId, lastLiveIds)
+        renderer.requestThumbnails()
+        onViewChanged()
+        transformBar.visibility = if (transforming && !moveSession) View.VISIBLE else View.GONE
+    }
+
+    private fun buildChrome() {
+        val root = rootView
+        root.setBackgroundColor(Ui.BG)
+        tips = Ui.Tips { a -> shortcuts.get(a).firstOrNull()?.label() }
+        toolButtons.clear()
+        layerPanel = LayerPanel(this, renderer, tips)
+        toolOptions = ToolOptions(this, this)
+        val ctx = this
+        val m = Ui.dp(ctx, 8f)
+
+        // ---- 상단 바: 기능별 묶음 (테두리 + 아래 이름표) ----
+        val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(m, m / 2, m, m / 2)
-            background = Ui.rounded(Ui.PANEL, Ui.dp(this@MainActivity, 10f).toFloat())
+            gravity = Gravity.BOTTOM
+            setPadding(m, m / 2 + 2, m, m / 2)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+        }
+        titleLabel = Ui.text(ctx, "", 13f, Ui.TEXT, bold = true).apply {
+            setPadding(Ui.dp(ctx, 4f), 0, Ui.dp(ctx, 12f), Ui.dp(ctx, 16f))
+            maxWidth = Ui.dp(ctx, 160f)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        bar.addView(titleLabel)
+        var group = LinearLayout(ctx)
+        fun group(label: String): TextView {
+            val icons = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                val p = Ui.dp(ctx, 2f)
+                setPadding(p, p, p, p)
+                background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            }
+            val name = Ui.text(ctx, label, 10.5f, Ui.MUTED).apply { setPadding(Ui.dp(ctx, 5f), Ui.dp(ctx, 2f), 0, 0) }
+            bar.addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(icons)
+                addView(name)
+            }, Ui.wrap().apply { rightMargin = Ui.dp(ctx, 8f) })
+            group = icons
+            return name
         }
         fun barBtn(icon: Int, tip: String, action: Action? = null, onClick: () -> Unit): ImageView {
-            val b = tips.bind(Ui.iconButton(this, icon, tip, onClick = onClick), tip, action)
-            bar.addView(b, Ui.square(this, 40f).apply { rightMargin = Ui.dp(this@MainActivity, 4f) })
+            val b = tips.bind(Ui.iconButton(ctx, icon, tip, 36f, ghost = true, onClick = onClick), tip, action)
+            group.addView(b, Ui.square(ctx, 36f))
             return b
         }
         fun act(icon: Int, tip: String, action: Action) = barBtn(icon, tip, action) { onShortcut(action) }
-        titleLabel = Ui.text(this, "", 13f, Ui.TEXT, bold = true).apply { setPadding(m, 0, m * 2, 0) }
-        bar.addView(titleLabel)
+
+        group("파일")
         act(R.drawable.ic_file_new, "새 캔버스", Action.FILE_NEW)
         act(R.drawable.ic_file_open, "열기", Action.FILE_OPEN)
         act(R.drawable.ic_file_save, "저장", Action.FILE_SAVE)
         barBtn(R.drawable.ic_file_export, "내보내기 (PNG · PSD)") { chooseExport() }
-        bar.addView(Ui.hspace(this, 12f))
+        group("편집")
         undoBtn = barBtn(R.drawable.ic_undo, "실행취소", Action.UNDO) { renderer.undo() }
         redoBtn = barBtn(R.drawable.ic_redo, "다시실행", Action.REDO) { renderer.redo() }
-        bar.addView(Ui.hspace(this, 12f))
+        group("선택")
         act(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM)
         act(R.drawable.ic_deselect, "선택 해제", Action.SELECT_NONE)
-        bar.addView(Ui.hspace(this, 12f))
+        viewLabel = group("보기")
         act(R.drawable.ic_view_fit, "화면에 맞춤", Action.VIEW_FIT)
         act(R.drawable.ic_view_rotate_reset, "회전 초기화", Action.VIEW_ROTATE_RESET)
         act(R.drawable.ic_view_flip, "화면 좌우 반전", Action.VIEW_FLIP)
-        bar.addView(Ui.hspace(this, 12f))
+        group("그리기 보조")
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
-        bar.addView(Ui.hspace(this, 12f))
-        viewLabel = Ui.text(this, "", 12f, Ui.SUBTEXT).apply { setPadding(m, 0, m, 0) }
-        bar.addView(viewLabel)
+        group("앱")
         perfBtn = barBtn(R.drawable.ic_gauge, "성능 측정 (FPS·펜 지연·부하 테스트)") { togglePerf() }
         barBtn(R.drawable.ic_keyboard, "단축키 설정") { openShortcutSettings() }
-        barBtn(R.drawable.ic_settings, "설정") { showSettings() }
+        barBtn(R.drawable.ic_settings, "설정 (테마·필압 등)") { showSettings() }
         panelBtn = barBtn(R.drawable.ic_panel, "오른쪽 패널 보이기/숨기기") {
             rightPanel.visibility = if (rightPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             Ui.setOn(panelBtn, rightPanel.visibility == View.VISIBLE)
         }
         Ui.setOn(panelBtn, true)
-        undoBtn.alpha = 0.4f
-        redoBtn.alpha = 0.4f
+        Ui.setEnabled(undoBtn, false)
+        Ui.setEnabled(redoBtn, false)
         updateSymmetryButton()
 
-        topBar = HorizontalScrollView(this).apply {
+        topBar = HorizontalScrollView(ctx).apply {
             isHorizontalScrollBarEnabled = false
             addView(bar)
         }
@@ -321,127 +407,159 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             setMargins(m, m, m, 0)
         })
 
-        // ---- 왼쪽 도구 막대 ----
-        val tools = LinearLayout(this).apply {
+        // ---- 왼쪽 도구 막대: 그리기 / 선택·이동 / 칠하기 / 기타로 나눔 ----
+        val tools = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(m / 2, m, m / 2, m)
-            background = Ui.rounded(Ui.PANEL, Ui.dp(this@MainActivity, 10f).toFloat())
+            setPadding(m / 2, m / 2 + 2, m / 2, m)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
         }
-        Tool.entries.forEach { t ->
-            val b = tips.bind(Ui.iconButton(this, toolIcon(t), t.label, 44f) { setTool(t) }, t.label, toolAction(t))
-            toolButtons[t] = b
-            tools.addView(b, Ui.square(this, 44f).apply {
-                bottomMargin = Ui.dp(this@MainActivity, 3f)
-            })
+        val groups = listOf(
+            listOf(Tool.PEN, Tool.PENCIL, Tool.AIRBRUSH, Tool.MARKER, Tool.ERASER),
+            listOf(Tool.SELECT, Tool.MOVE),
+            listOf(Tool.FILL, Tool.GRADIENT),
+            listOf(Tool.EYEDROPPER, Tool.HAND),
+        )
+        groups.forEachIndexed { gi, list ->
+            if (gi > 0) tools.addView(Ui.shortDivider(ctx, 28f))
+            for (t in list) {
+                val b = tips.bind(Ui.iconButton(ctx, toolIcon(t), t.label, 42f, ghost = true) { setTool(t) }, t.label, toolAction(t))
+                toolButtons[t] = b
+                tools.addView(b, Ui.square(ctx, 42f).apply { bottomMargin = Ui.dp(ctx, 2f) })
+            }
         }
-        val swatchSize = Ui.dp(this, 40f)
-        val swatches = FrameLayout(this)
-        secondarySwatch = View(this).apply { setOnClickListener { onShortcut(Action.COLOR_SWAP) } }
-        primarySwatch = View(this).apply {
-            setOnClickListener { Dialogs.colorPicker(this@MainActivity, settings.primaryColor) { setPrimary(it) } }
+        tools.addView(Ui.shortDivider(ctx, 28f))
+        val swatchSize = Ui.dp(ctx, 30f)
+        val swatches = FrameLayout(ctx)
+        secondarySwatch = View(ctx).apply { setOnClickListener { onShortcut(Action.COLOR_SWAP) } }
+        primarySwatch = View(ctx).apply {
+            setOnClickListener { Dialogs.colorPicker(ctx, settings.primaryColor) { setPrimary(it) } }
         }
         tips.bind(secondarySwatch, "보조색 (누르면 주색과 바꾸기)", Action.COLOR_SWAP)
         tips.bind(primarySwatch, "주색 (누르면 색 선택)")
         swatches.addView(secondarySwatch, FrameLayout.LayoutParams(swatchSize, swatchSize, Gravity.BOTTOM or Gravity.END))
         swatches.addView(primarySwatch, FrameLayout.LayoutParams(swatchSize, swatchSize, Gravity.TOP or Gravity.START))
-        tools.addView(swatches, LinearLayout.LayoutParams(swatchSize + Ui.dp(this, 16f), swatchSize + Ui.dp(this, 16f)).apply {
-            topMargin = Ui.dp(this@MainActivity, 6f)
-        })
-        toolBar = ScrollView(this).apply {
+        tools.addView(swatches, LinearLayout.LayoutParams(swatchSize + Ui.dp(ctx, 12f), swatchSize + Ui.dp(ctx, 12f)))
+        toolBar = ScrollView(ctx).apply {
             isVerticalScrollBarEnabled = false
             addView(tools)
         }
         root.addView(toolBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-            setMargins(m, Ui.dp(this@MainActivity, 64f), 0, m)
+            setMargins(m, Ui.dp(ctx, 72f), 0, m)
         })
 
-        // ---- 오른쪽 패널: 도구 옵션 + 레이어 ----
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = Ui.dp(this@MainActivity, 12f)
-            setPadding(p, p, p, p)
-            background = Ui.rounded(Ui.PANEL, Ui.dp(this@MainActivity, 10f).toFloat())
-        }
-        panel.addView(ScrollView(this).apply {
+        // ---- 오른쪽 패널: 카드 3장 (도구 속성 / 색 / 레이어) ----
+        val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        toolCard = Ui.Card(ctx, "도구 속성", settings.cardToolOpen) { open -> settings.cardToolOpen = open; relayoutCards() }
+        toolOptions.titleView = toolCard.titleView
+        toolCard.body.addView(ScrollView(ctx).apply {
+            isVerticalScrollBarEnabled = false
             addView(toolOptions.view)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.9f))
-        panel.addView(toolOptions.recentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = Ui.dp(this@MainActivity, 6f)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        colorCard = Ui.Card(ctx, "색", settings.cardColorOpen) { open -> settings.cardColorOpen = open; relayoutCards() }
+        colorPicker = ColorPickerView(ctx).apply {
+            heightRatio = 0.55f
+            color = settings.primaryColor
+            onColorChanged = { c -> livePrimary(c) }
+            onColorCommitted = { c -> setPrimary(c) }
+        }
+        colorCard.body.addView(colorPicker, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        colorCard.body.addView(toolOptions.recentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = Ui.dp(ctx, 8f)
         })
-        panel.addView(Ui.divider(this))
-        panel.addView(layerPanel.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f))
+
+        layerCard = Ui.Card(ctx, "레이어", settings.cardLayerOpen) { open -> settings.cardLayerOpen = open; relayoutCards() }
+        layerPanel.headerActions.forEach { layerCard.addAction(it) }
+        layerCard.body.addView(layerPanel.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        panel.addView(toolCard.view)
+        panel.addView(colorCard.view)
+        panel.addView(layerCard.view)
         rightPanel = panel
-        root.addView(rightPanel, FrameLayout.LayoutParams(Ui.dp(this, 310f), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
-            setMargins(m, Ui.dp(this@MainActivity, 64f), m, m)
+        relayoutCards()
+        root.addView(rightPanel, FrameLayout.LayoutParams(Ui.dp(ctx, 300f), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
+            setMargins(m, Ui.dp(ctx, 72f), m, m)
         })
 
         // ---- 변형 확정/취소 바 ----
-        val tb = LinearLayout(this).apply {
+        val tb = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(m, m / 2, m, m / 2)
-            background = Ui.rounded(Ui.PANEL, Ui.dp(this@MainActivity, 10f).toFloat())
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
             visibility = View.GONE
         }
         fun tbBtn(icon: Int, tip: String, onClick: () -> Unit): ImageView {
-            val b = Ui.iconButton(this, icon, tip, onClick = onClick)
-            tb.addView(b, Ui.square(this, 40f).apply { rightMargin = Ui.dp(this@MainActivity, 4f) })
+            val b = Ui.iconButton(ctx, icon, tip, ghost = true, onClick = onClick)
+            tb.addView(b, Ui.square(ctx, 40f).apply { rightMargin = Ui.dp(ctx, 4f) })
             return b
         }
-        tb.addView(Ui.text(this, "자유 변형", 13f, bold = true).apply { setPadding(m, 0, m * 2, 0) })
+        tb.addView(Ui.text(ctx, "자유 변형", 13f, bold = true).apply { setPadding(m, 0, m * 2, 0) })
         tbBtn(R.drawable.ic_flip_h, "좌우 반전") { overlay.flip(true) }
         tbBtn(R.drawable.ic_flip_v, "상하 반전") { overlay.flip(false) }
         tbBtn(R.drawable.ic_rotate_90, "90° 회전") { overlay.rotateBy((Math.PI / 2).toFloat()) }
-        tb.addView(Ui.hspace(this, 8f))
+        tb.addView(Ui.hspace(ctx, 8f))
         Ui.setOn(tbBtn(R.drawable.ic_check, "확정 (Enter)") { commitTransform() }, true)
         tbBtn(R.drawable.ic_close, "취소 (Esc)") { cancelTransform() }
         transformBar = tb
         root.addView(transformBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            bottomMargin = Ui.dp(this@MainActivity, 16f)
+            bottomMargin = Ui.dp(ctx, 16f)
         })
 
         // ---- 성능 측정 패널 ----
-        perfText = Ui.text(this, "펜으로 그리면 측정합니다.", 12f).apply { typeface = android.graphics.Typeface.MONOSPACE }
-        benchText = Ui.text(this, "", 12f, Ui.SUBTEXT).apply { typeface = android.graphics.Typeface.MONOSPACE }
-        perfPanel = LinearLayout(this).apply {
+        perfText = Ui.text(ctx, "펜으로 그리면 측정합니다.", 12f).apply { typeface = android.graphics.Typeface.MONOSPACE }
+        benchText = Ui.text(ctx, "", 12f, Ui.SUBTEXT).apply { typeface = android.graphics.Typeface.MONOSPACE }
+        perfPanel = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            val p = Ui.dp(this@MainActivity, 10f)
+            val p = Ui.dp(ctx, 10f)
             setPadding(p, p, p, p)
-            background = Ui.rounded(Ui.PANEL, Ui.dp(this@MainActivity, 10f).toFloat())
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
             visibility = View.GONE
-            addView(Ui.text(this@MainActivity, "성능 측정", 13f, bold = true))
+            addView(Ui.text(ctx, "성능 측정", 13f, bold = true))
             addView(perfText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = Ui.dp(this@MainActivity, 4f)
+                topMargin = Ui.dp(ctx, 4f)
             })
-            addView(LinearLayout(this@MainActivity).apply {
+            addView(LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(Ui.button(this@MainActivity, "부하 테스트 문서 (A4 300dpi · 50장)") { loadStressDocument() }, Ui.wrap())
-                addView(Ui.hspace(this@MainActivity, 6f))
-                addView(Ui.button(this@MainActivity, "합성 벤치마크") {
+                addView(Ui.button(ctx, "부하 테스트 문서 (A4 300dpi · 50장)") { loadStressDocument() }, Ui.wrap())
+                addView(Ui.hspace(ctx, 6f))
+                addView(Ui.button(ctx, "합성 벤치마크") {
                     benchText.text = "측정 중… (몇 초 걸립니다)"
                     renderer.runBenchmark()
                 }, Ui.wrap())
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = Ui.dp(this@MainActivity, 8f)
+                topMargin = Ui.dp(ctx, 8f)
             })
             addView(benchText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = Ui.dp(this@MainActivity, 6f)
+                topMargin = Ui.dp(ctx, 6f)
             })
         }
         root.addView(perfPanel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
-            setMargins(Ui.dp(this@MainActivity, 76f), Ui.dp(this@MainActivity, 64f), 0, 0)
+            setMargins(Ui.dp(ctx, 76f), Ui.dp(ctx, 72f), 0, 0)
         })
 
-        // ---- 중앙 HUD (단축키 피드백) ----
-        hud = Ui.text(this, "", 16f, Ui.TEXT, bold = true).apply {
-            val p = Ui.dp(this@MainActivity, 14f)
+        // ---- 중앙 HUD (단축키 피드백) — 두 테마 모두 어두운 말풍선 ----
+        hud = Ui.text(ctx, "", 16f, 0xFFF2F2F4.toInt(), bold = true).apply {
+            val p = Ui.dp(ctx, 14f)
             setPadding(p, p / 2, p, p / 2)
-            background = Ui.rounded(0xDD000000.toInt(), Ui.dp(this@MainActivity, 8f).toFloat())
+            background = Ui.rounded(0xDD000000.toInt(), Ui.dp(ctx, 8f).toFloat())
             visibility = View.GONE
         }
         root.addView(hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        return root
+    }
+
+    /** 카드 접힘에 따라 높이를 다시 나눔: 펼친 도구·레이어 카드가 남은 공간을 나눠 가짐. */
+    private fun relayoutCards() {
+        val gap = Ui.dp(this, 8f)
+        fun lp(open: Boolean, weight: Float, last: Boolean) =
+            (if (open && weight > 0f) LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, weight)
+            else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                .apply { if (!last) bottomMargin = gap }
+        toolCard.view.layoutParams = lp(toolCard.open, 0.9f, false)
+        colorCard.view.layoutParams = lp(colorCard.open, 0f, false)
+        layerCard.view.layoutParams = lp(layerCard.open, 1.1f, true)
+        rightPanel.requestLayout()
     }
 
     // =====================================================================
@@ -454,7 +572,14 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         toolButtons.forEach { (t, b) -> Ui.setOn(b, t == tool) }
     }
 
-    private fun updateSwatches() {
+    /** 색 카드에서 드래그 중: 최근 색에는 넣지 않고 주색만 바꿈. */
+    private fun livePrimary(c: Int) {
+        settings.primaryColor = c
+        updateSwatches(syncPicker = false)
+    }
+
+    private fun updateSwatches(syncPicker: Boolean = true) {
+        if (syncPicker && colorPicker.color != settings.primaryColor) colorPicker.color = settings.primaryColor
         val r = Ui.dp(this, 6f).toFloat()
         val stroke = Ui.dp(this, 2f)
         primarySwatch.background = Ui.rounded(settings.primaryColor, r, stroke, Color.WHITE)
@@ -582,7 +707,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onViewChanged() {
         val v = canvasView.viewport
-        viewLabel.text = "${(v.scale * 100).roundToInt()}% · ${v.rotationDegrees}°${if (v.flipped) " · 반전" else ""}"
+        viewLabel.text = "보기 · ${(v.scale * 100).roundToInt()}% · ${v.rotationDegrees}°${if (v.flipped) " · 반전" else ""}"
         overlay.invalidate()
     }
 
@@ -731,6 +856,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onLayersChanged(nodes: List<NodeInfo>, activeId: Int, liveRasterIds: Set<Int>) {
         lastNodes = nodes
         lastActiveId = activeId
+        lastLiveIds = liveRasterIds
         val maskEditing = renderer.maskEditing && nodes.firstOrNull { it.id == activeId }?.props?.mask == true
         if (maskEditing != lastMaskEditing) {
             lastMaskEditing = maskEditing
@@ -741,6 +867,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     override fun onHistoryChanged(canUndo: Boolean, canRedo: Boolean) {
+        lastCanUndo = canUndo
+        lastCanRedo = canRedo
         Ui.setEnabled(undoBtn, canUndo)
         Ui.setEnabled(redoBtn, canRedo)
         updateTitle()
@@ -977,7 +1105,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     }
 
     private fun showSettings() {
-        Dialogs.settings(this, settings, onChanged = { settings.save() }, onOpenShortcuts = { openShortcutSettings() })
+        Dialogs.settings(this, settings, onChanged = { settings.save() }, onOpenShortcuts = { openShortcutSettings() }, onThemeChanged = { rebuildUi() })
     }
 
     // =====================================================================
@@ -1035,7 +1163,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private fun chooseExport() {
         val png = tips.text("PNG 이미지 (한 장으로 합침)", Action.FILE_EXPORT_PNG)
         val psd = tips.text("PSD (레이어·폴더 유지 · 클립 스튜디오/포토샵)", Action.FILE_EXPORT_PSD)
-        android.app.AlertDialog.Builder(this)
+        Ui.dialog(this)
             .setTitle("내보내기")
             .setItems(arrayOf(png, psd)) { _, which -> if (which == 0) exportPng() else exportPsd() }
             .setNegativeButton("취소", null)

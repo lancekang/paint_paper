@@ -24,6 +24,10 @@ class ColorPickerView(context: Context) : View(context) {
     private val hueRect = RectF()
     private var dragging = 0 // 1 = SV, 2 = Hue
     var onColorChanged: ((Int) -> Unit)? = null
+    /** 손을 뗐을 때 (최근 색에 넣는 등 확정 동작용) */
+    var onColorCommitted: ((Int) -> Unit)? = null
+    /** 높이 = 너비 × 비율 (패널에 넣을 때는 낮게) */
+    var heightRatio = 0.95f
 
     var color: Int
         get() = Color.HSVToColor(hsv)
@@ -34,7 +38,7 @@ class ColorPickerView(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, (w * 0.95f).toInt())
+        setMeasuredDimension(w, (w * heightRatio).toInt())
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -75,7 +79,10 @@ class ColorPickerView(context: Context) : View(context) {
                 update(e.x, e.y)
             }
             MotionEvent.ACTION_MOVE -> update(e.x, e.y)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = 0
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragging != 0) onColorCommitted?.invoke(color)
+                dragging = 0
+            }
         }
         return true
     }

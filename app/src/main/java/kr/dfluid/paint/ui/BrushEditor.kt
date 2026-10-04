@@ -199,7 +199,7 @@ object BrushEditor {
         param("크기 흔들림", 0f, 1f, { b.sizeJitter }, { b.sizeJitter = it }, pct)
 
         val scroll = ScrollView(ctx).apply { addView(root) }
-        AlertDialog.Builder(ctx)
+        Ui.dialog(ctx)
             .setTitle("브러시 설정 · ${original.tool.label}")
             .setView(scroll)
             .setPositiveButton("저장") { _, _ ->

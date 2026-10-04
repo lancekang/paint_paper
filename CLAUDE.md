@@ -36,6 +36,8 @@
 
 - UI 문자열과 주석은 한국어. 사용자 메시지는 존댓말(~합니다/~세요).
 - AndroidX를 추가하지 않습니다. UI는 코드로 만든 프레임워크 위젯(`ui/Ui.kt` 도우미).
+- **색은 하드코딩하지 말고 `Ui.TEXT/CARD/BUTTON_ON…`** (라이트/다크 테마, `Ui.applyTheme`). 대화상자는 `Ui.dialog(ctx)`, 아이콘은 `Ui.iconButton`(ghost = 묶음 안), 드롭다운은 `Ui.styleSpinner`, 슬라이더는 `Ui.styleSeek`.
+- 테마가 바뀌면 `MainActivity.rebuildUi()`가 캔버스(GLSurfaceView)는 그대로 두고 둘레 UI(`buildChrome`)만 다시 만듭니다. **GLSurfaceView를 떼면 GL 컨텍스트를 잃으니 절대 떼지 말 것.**
 - GL 호출은 **GL 스레드에서만**. UI 스레드는 `CanvasRenderer`의 public 메서드(명령 큐에 post)만 호출하고, 결과는 `Listener` 콜백(메인 스레드)으로 받습니다.
 - `GLES20.xxx` / `GLES30.xxx`를 구분해서 씁니다 (3.0 전용만 GLES30).
 

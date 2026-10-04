@@ -37,6 +37,12 @@ class AppSettings(context: Context) {
     var canvasTransparent = false
     var canvasBackground = Color.WHITE
     val recentColors = ArrayList<Int>()
+    /** 화면 테마: THEME_SYSTEM / THEME_LIGHT / THEME_DARK */
+    var themeMode = THEME_SYSTEM
+    /** 오른쪽 패널 카드 펼침 */
+    var cardToolOpen = true
+    var cardColorOpen = true
+    var cardLayerOpen = true
 
     init {
         pressureGamma = prefs.getFloat("pressureGamma", 1f)
@@ -61,6 +67,10 @@ class AppSettings(context: Context) {
         gradientOpacity = prefs.getFloat("gradientOpacity", 1f)
         canvasTransparent = prefs.getBoolean("canvasTransparent", false)
         canvasBackground = prefs.getInt("canvasBackground", Color.WHITE)
+        themeMode = prefs.getInt("themeMode", THEME_SYSTEM)
+        cardToolOpen = prefs.getBoolean("cardToolOpen", true)
+        cardColorOpen = prefs.getBoolean("cardColorOpen", true)
+        cardLayerOpen = prefs.getBoolean("cardLayerOpen", true)
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
     }
 
@@ -101,10 +111,17 @@ class AppSettings(context: Context) {
             .putBoolean("canvasTransparent", canvasTransparent)
             .putInt("canvasBackground", canvasBackground)
             .putString("recentColors", recentColors.joinToString(","))
+            .putInt("themeMode", themeMode)
+            .putBoolean("cardToolOpen", cardToolOpen)
+            .putBoolean("cardColorOpen", cardColorOpen)
+            .putBoolean("cardLayerOpen", cardLayerOpen)
             .apply()
     }
 
     companion object {
         const val MAX_RECENT = 12
+        const val THEME_SYSTEM = 0
+        const val THEME_LIGHT = 1
+        const val THEME_DARK = 2
     }
 }

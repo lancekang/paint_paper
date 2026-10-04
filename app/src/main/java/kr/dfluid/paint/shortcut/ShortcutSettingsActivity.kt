@@ -31,6 +31,8 @@ class ShortcutSettingsActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 앱 테마(라이트/다크)를 따라갑니다.
+        setTheme(if (kr.dfluid.paint.ui.Ui.dark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light)
         super.onCreate(savedInstanceState)
         store = ShortcutStore(this)
         adapter = RowAdapter(buildRows())
@@ -65,7 +67,7 @@ class ShortcutSettingsActivity : Activity() {
                 finish(); return true
             }
             MENU_RESET -> {
-                AlertDialog.Builder(this)
+                kr.dfluid.paint.ui.Ui.dialog(this)
                     .setMessage("모든 단축키를 기본값으로 되돌릴까요?")
                     .setPositiveButton("되돌리기") { _, _ ->
                         store.resetAll()
@@ -81,7 +83,7 @@ class ShortcutSettingsActivity : Activity() {
 
     private fun showOptions(action: Action) {
         val options = arrayOf("단축키 바꾸기", "단축키 추가", "모두 지우기", "기본값으로")
-        AlertDialog.Builder(this)
+        kr.dfluid.paint.ui.Ui.dialog(this)
             .setTitle(action.label)
             .setItems(options) { _, which ->
                 when (which) {
@@ -101,7 +103,7 @@ class ShortcutSettingsActivity : Activity() {
     /** 키 입력 대기. 수식키만 눌렀다 떼면 그 수식키 단독 바인딩(예: Alt 홀드)이 됩니다. */
     private fun capture(action: Action, replace: Boolean) {
         var pendingModifier: Int? = null
-        val dialog = AlertDialog.Builder(this)
+        val dialog = kr.dfluid.paint.ui.Ui.dialog(this)
             .setTitle(action.label)
             .setMessage("새 키 조합을 누르세요.\n(Esc = 취소)")
             .setNegativeButton("취소", null)
@@ -150,7 +152,7 @@ class ShortcutSettingsActivity : Activity() {
             Toast.makeText(this, "${action.label}: ${binding.label()}", Toast.LENGTH_SHORT).show()
         }
         if (owner != null && owner != action) {
-            AlertDialog.Builder(this)
+            kr.dfluid.paint.ui.Ui.dialog(this)
                 .setMessage("${binding.label()}은(는) 이미 '${owner.label}'에 지정되어 있습니다.\n'${action.label}'(으)로 옮길까요?")
                 .setPositiveButton("옮기기") { _, _ -> commit() }
                 .setNegativeButton("취소", null)

@@ -92,6 +92,18 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     @Volatile var hasSelection = false
         private set
     val perf = PerfMonitor()
+    /** 캔버스 밖을 칠할 색 (테마) */
+    @Volatile private var backdrop = floatArrayOf(0.19f, 0.195f, 0.205f)
+
+    fun setBackdrop(color: Int) {
+        backdrop = floatArrayOf(Color.red(color) / 255f, Color.green(color) / 255f, Color.blue(color) / 255f)
+        requestRender()
+    }
+
+    /** UI를 다시 만든 뒤 모든 레이어·마스크 썸네일을 다시 보내 달라고 할 때. */
+    fun requestThumbnails() = post {
+        thumbQueue.addAll(surfaces.keys)
+    }
     /** 활성 레이어의 마스크를 편집 중 (활성 레이어에 마스크가 있을 때만 의미 있음). UI는 읽기만. */
     @Volatile var maskEditing = false
         private set
@@ -1904,7 +1916,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         GlState.bindFbo(0)
         GLES20.glViewport(0, 0, screenW, screenH)
         GlState.noScissor()
-        GLES20.glClearColor(0.19f, 0.195f, 0.205f, 1f)
+        val bd = backdrop
+        GLES20.glClearColor(bd[0], bd[1], bd[2], 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         GlState.off()
 
