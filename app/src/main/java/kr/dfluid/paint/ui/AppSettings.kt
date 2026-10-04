@@ -116,7 +116,7 @@ class AppSettings(context: Context) {
         wandGap = prefs.getInt("wandGap", 0)
         wandExpand = prefs.getInt("wandExpand", 0)
         selModifyPx = prefs.getInt("selModifyPx", 4)
-        shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 3)
+        shapeKind = prefs.getInt("shapeKind", 1).coerceIn(0, 4)
         shapeFill = prefs.getInt("shapeFill", 0).coerceIn(0, 2)
         textSize = prefs.getFloat("textSize", 48f).coerceIn(4f, 1000f)
         textFont = prefs.getInt("textFont", 0).coerceIn(0, 2)

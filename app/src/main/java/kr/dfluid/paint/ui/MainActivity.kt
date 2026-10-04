@@ -86,6 +86,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override val straightLine: Boolean get() = straightLineOn
     override val postSmoothing: Float get() = settings.postSmoothing
     override val shapeKind: Int get() = settings.shapeKind
+    override val balloonFillColor: Int get() = settings.secondaryColor
     override val shapeFill: Int get() = settings.shapeFill
     private lateinit var lineBtn: ImageView
     private val holds = ArrayList<Action>()

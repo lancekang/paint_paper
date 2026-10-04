@@ -264,13 +264,13 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildShape() {
         val s = host.settings
-        view.addView(toggleRow(listOf("직선", "사각형", "타원", "올가미 채우기"), s.shapeKind) {
+        view.addView(toggleRow(listOf("직선", "사각형", "타원", "올가미", "말풍선"), s.shapeKind) {
             s.shapeKind = it; s.save()
         }, lp(2f))
         view.addView(toggleRow(listOf("선", "채우기", "선+채우기"), s.shapeFill) {
             s.shapeFill = it; s.save()
         }, lp(4f))
-        view.addView(hint("드래그해 그립니다. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미 채우기는 그린 모양 그대로 칠합니다."), lp())
+        view.addView(hint("드래그해 그립니다. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미는 그린 모양 그대로 칠합니다. 말풍선은 안쪽 = 보조색, 테두리 = 주색."), lp())
     }
 
     // ---- 선택 ----

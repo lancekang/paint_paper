@@ -43,9 +43,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val postSmoothing: Float
         /** true면 캔버스 입력을 받지 않음 (문서를 불러오는 중) */
         val inputBlocked: Boolean
-        /** 도형 도구: 종류(0 직선, 1 사각형, 2 타원, 3 올가미 채우기)와 채우기(0 선, 1 채우기, 2 둘 다) */
+        /** 도형 도구: 종류(0 직선, 1 사각형, 2 타원, 3 올가미 채우기, 4 말풍선)와 채우기(0 선, 1 채우기, 2 둘 다) */
         val shapeKind: Int
         val shapeFill: Int
+        /** 말풍선 안쪽 색 (보조색) */
+        val balloonFillColor: Int
         /** 원근 자·동심원 자 */
         val ruler: GuideRuler
         /** 자 손잡이(소실점·중심)를 옮겼을 때 (안내선 다시 그리기) */
@@ -83,6 +85,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     // ---- 도형 ----
     private var shapeBrush: Brush? = null
     private val lassoPts = ArrayList<Float>()
+    /** 마지막 도형 계산 결과 (말풍선은 펜을 뗄 때 채우기·선을 따로 확정) */
+    private var lastLine = FloatArray(0)
+    private var lastFill: FloatArray? = null
 
     // ---- 원근 자·동심원 자 ----
     // 획을 시작하고 RULER_DECIDE_DP 만큼 움직여야 방향을 알 수 있으므로, 그 전까지의 점은 모아 둡니다.
@@ -513,7 +518,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 val r = if (alt) downCx + kotlin.math.abs(dx) else maxOf(downCx, downCx + dx)
                 val t = if (alt) downCy - kotlin.math.abs(dy) else minOf(downCy, downCy + dy)
                 val b = if (alt) downCy + kotlin.math.abs(dy) else maxOf(downCy, downCy + dy)
-                outline = if (kind == 1) floatArrayOf(l, t, r, t, r, b, l, b) else ellipsePoints(l, t, r, b)
+                outline = when (kind) {
+                    1 -> floatArrayOf(l, t, r, t, r, b, l, b)
+                    4 -> balloonPoints(l, t, r, b)
+                    else -> ellipsePoints(l, t, r, b)
+                }
                 closed = true
             }
         }
@@ -544,7 +553,32 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             var off = stamps.size
             for (m in mirrors) { System.arraycopy(m, 0, combined, off, m.size); off += m.size }
         }
-        renderer.setStrokeLine(combined, if (wantFill && outline.size >= 6) outline else null)
+        lastLine = combined
+        lastFill = if (wantFill && outline.size >= 6) outline else null
+        // 말풍선은 미리보기에서 채우기를 빼고 선만 (채우기 색이 다르므로 확정 때 따로)
+        renderer.setStrokeLine(combined, if (kind == 4) null else lastFill)
+    }
+
+    /** 말풍선: 타원 + 아래 왼쪽으로 뾰족한 꼬리. 꼬리가 붙는 둘레 구간을 꼭짓점으로 바꿉니다. */
+    private fun balloonPoints(l: Float, t: Float, r: Float, b: Float): FloatArray {
+        val e = ellipsePoints(l, t, r, b)
+        val n = e.size / 2
+        val cx = (l + r) / 2f; val cy = (t + b) / 2f
+        val rx = (r - l) / 2f; val ry = (b - t) / 2f
+        // 각도는 오른쪽 0, 아래쪽 90° (화면 좌표). 꼬리는 100°~125° 사이에서 나감
+        val a0 = 100.0 * PI / 180.0; val a1 = 125.0 * PI / 180.0
+        val tipX = cx - rx * 0.55f; val tipY = cy + ry * 1.55f
+        val out = ArrayList<Float>(e.size + 2)
+        var tipAdded = false
+        for (k in 0 until n) {
+            val a = 2 * PI * k / n
+            if (a in a0..a1) {
+                if (!tipAdded) { out.add(tipX); out.add(tipY); tipAdded = true }
+                continue
+            }
+            out.add(e[k * 2]); out.add(e[k * 2 + 1])
+        }
+        return out.toFloatArray()
     }
 
     /** 타원 둘레 점 (화면에서 약 3px 간격). */
@@ -706,7 +740,20 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 if (tiny) renderer.cancelStroke()
                 else {
                     updateShape(tmp[0], tmp[1], e.metaState, h)
-                    renderer.endStroke()
+                    val fill = lastFill
+                    val brush = shapeBrush
+                    if (h.shapeKind == 4 && fill != null && brush != null) {
+                        // 말풍선: 안쪽(보조색)을 먼저, 테두리(주색)를 그 위에 따로 확정
+                        renderer.cancelStroke()
+                        renderer.beginStroke(brush, h.balloonFillColor, h.tipFor(brush))
+                        renderer.setStrokeLine(FloatArray(0), fill)
+                        renderer.endStroke()
+                        if (lastLine.isNotEmpty()) {
+                            renderer.beginStroke(brush, h.brushColor, h.tipFor(brush))
+                            renderer.setStrokeLine(lastLine, null)
+                            renderer.endStroke()
+                        }
+                    } else renderer.endStroke()
                 }
                 shapeBrush = null
             }
