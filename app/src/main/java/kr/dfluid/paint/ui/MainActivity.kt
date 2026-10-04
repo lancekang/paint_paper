@@ -796,6 +796,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         sbBtn(R.drawable.ic_transform, "자유 변형", Action.TRANSFORM) { onShortcut(Action.TRANSFORM) }
         sbBtn(R.drawable.ic_quick_mask, "퀵 마스크", Action.SELECT_QUICK_MASK) { onShortcut(Action.SELECT_QUICK_MASK) }
         sbText("컷", "컷 나누기: 선택 범위로 컷 폴더 만들기 (컷 영역 + 클리핑된 그림 + 테두리)", null) { chooseFrame() }
+        sbText("저장", "선택 영역 저장 (나중에 불러오기)", null) {
+            renderer.storeSelection { names -> showHud("${names.last()}(으)로 저장했습니다") }
+        }
         selBar = sb
         root.addView(selBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
             bottomMargin = Ui.dp(ctx, 16f)
@@ -1464,6 +1467,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         startActivityForResult(intent, REQ_BRUSH_EXPORT)
     }
 
+    override fun loadStoredSelection() = chooseStoredSelection()
+
     override fun onPickModeChanged() {
         renderer.pickFromLayer = settings.pickFromLayer
     }
@@ -1556,6 +1561,28 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onSelectionChanged(hasSelection: Boolean) {
         this.hasSelection = hasSelection
         updateSelBar()
+    }
+
+    /** 저장해 둔 선택 영역 고르기 (새로 / 추가 / 빼기) */
+    private fun chooseStoredSelection() {
+        renderer.listStoredSelections { names ->
+            if (names.isEmpty()) {
+                showHud("저장한 선택 영역이 없습니다 (선택 범위 런처의 \"저장\")")
+                return@listStoredSelections
+            }
+            Ui.dialog(this)
+                .setTitle("선택 영역 불러오기")
+                .setItems(names.toTypedArray()) { _, i ->
+                    val ops = arrayOf("새로 (바꾸기)", "추가", "빼기", "교차")
+                    Ui.dialog(this)
+                        .setTitle(names[i])
+                        .setItems(ops) { _, k -> renderer.loadStoredSelection(i, kr.dfluid.paint.engine.SelOp.entries[k]) }
+                        .setNegativeButton("취소", null)
+                        .show()
+                }
+                .setNegativeButton("닫기", null)
+                .show()
+        }
     }
 
     /** 컷 테두리 굵기를 고르고 만들기 */

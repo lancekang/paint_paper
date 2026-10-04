@@ -35,6 +35,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         fun exportBrushFile(brush: Brush)
         fun importBrushFile()
         fun onPickModeChanged()
+        fun loadStoredSelection()
     }
 
     val view = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -339,6 +340,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         }
         view.addView(row2, lp(4f))
         view.addView(Ui.button(ctx, "레이어의 불투명한 부분 선택") { host.selectFromLayer() }, lp(4f))
+        view.addView(Ui.button(ctx, "저장한 선택 영역 불러오기…") { host.loadStoredSelection() }, lp(4f))
     }
 
     // ---- 채우기 ----

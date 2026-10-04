@@ -1412,6 +1412,43 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         requestRender()
     }
 
+    /** 저장해 둔 선택 영역 (이름, RLE). 문서를 바꾸면 비움 */
+    private val storedSelections = ArrayList<Pair<String, ByteArray>>()
+
+    /** 지금 선택 영역을 저장 목록에 넣고, 목록 이름을 [done]으로 (메인 스레드) */
+    fun storeSelection(done: (List<String>) -> Unit) = post {
+        val enc = selEncoded
+        if (!hasSelection || enc == null) {
+            reportError("저장할 선택 영역이 없습니다.")
+            return@post
+        }
+        storedSelections.add("선택 ${storedSelections.size + 1}" to enc)
+        val names = storedSelections.map { it.first }
+        main.post { done(names) }
+    }
+
+    /** 저장 목록의 이름들 (메인 스레드 콜백) */
+    fun listStoredSelections(done: (List<String>) -> Unit) = post {
+        val names = storedSelections.map { it.first }
+        main.post { done(names) }
+    }
+
+    /** 저장해 둔 [i]번째 선택 영역을 [selOp]로 합침 (실행취소 가능) */
+    fun loadStoredSelection(i: Int, selOp: SelOp) = post {
+        val d = doc ?: return@post
+        if (op is Op.Transform) return@post
+        val enc = storedSelections.getOrNull(i)?.second ?: return@post
+        cancelPreviewOps()
+        val (_, buf) = SelectionMask.decode(enc)
+        val arr = ByteArray(d.width * d.height)
+        buf.get(arr)
+        val before = selEncoded
+        val m = selection ?: SelectionMask(d.width, d.height).also { selection = it }
+        if (!hasSelection) m.clear()
+        m.applyMask(arr, selOp)
+        commitSelectionChange(before)
+    }
+
     fun invertSelection() = post {
         val d = doc ?: return@post
         if (op is Op.Transform) return@post
@@ -2130,6 +2167,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
             return
         }
         clearSelectionState()
+        storedSelections.clear()
         version++
         val v = version
         if (onLoaded != null) main.post { onLoaded(v) }
