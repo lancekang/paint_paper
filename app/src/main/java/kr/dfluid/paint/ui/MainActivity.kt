@@ -1736,7 +1736,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             Action.FILE_OPEN -> confirmIfDirty { openDocument() }
             Action.FILE_SAVE -> save()
             Action.FILE_SAVE_AS -> saveAs()
-            Action.FILE_EXPORT_PNG -> exportPng()
+            Action.FILE_EXPORT_PNG -> { exportFormat = 0; exportScale = 100; exportPng() }
             Action.FILE_EXPORT_PSD -> exportPsd()
             else -> Unit
         }
@@ -1864,13 +1864,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     private fun chooseExport() {
         val png = tips.text("PNG 이미지 (한 장으로 합침)", Action.FILE_EXPORT_PNG)
         val psd = tips.text("PSD (레이어·폴더 유지 · 클립 스튜디오/포토샵)", Action.FILE_EXPORT_PSD)
-        val items = if (animExists && animCount > 0) arrayOf(png, psd, "애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)") else arrayOf(png, psd)
+        val list = arrayListOf(png, psd, "JPEG / 크기 바꿔 내보내기…")
+        if (animExists && animCount > 0) list.add("애니메이션 GIF (${animCount}프레임 · ${settings.animFps}fps)")
         Ui.dialog(this)
             .setTitle("내보내기")
-            .setItems(items) { _, which ->
+            .setItems(list.toTypedArray()) { _, which ->
                 when (which) {
-                    0 -> exportPng()
+                    0 -> { exportFormat = 0; exportScale = 100; exportPng() }
                     1 -> exportPsd()
+                    2 -> chooseImageExport()
                     else -> exportGif()
                 }
             }
@@ -1972,13 +1974,63 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
     }
 
+    /** 이미지 내보내기 형식: 0 PNG, 1 JPEG (흰 배경에 합침) */
+    private var exportFormat = 0
+    /** 크기 배율 (%) */
+    private var exportScale = 100
+
     private fun exportPng() {
+        val jpg = exportFormat == 1
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/png"
-            putExtra(Intent.EXTRA_TITLE, (currentUri?.let { displayName(it)?.substringBeforeLast('.') } ?: "그림") + ".png")
+            type = if (jpg) "image/jpeg" else "image/png"
+            putExtra(Intent.EXTRA_TITLE, (currentUri?.let { displayName(it)?.substringBeforeLast('.') } ?: "그림") + if (jpg) ".jpg" else ".png")
         }
         startActivityForResult(intent, REQ_EXPORT)
+    }
+
+    /** 형식(PNG/JPEG)과 크기(%)를 골라 내보내기 */
+    private fun chooseImageExport() {
+        val ctx = this
+        val pad = Ui.dp(ctx, 20f)
+        var fmt = 1
+        var scale = 100
+        val w = canvasView.viewport.canvasW.toInt()
+        val h = canvasView.viewport.canvasH.toInt()
+        val fmtRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val fmtBtns = ArrayList<TextView>()
+        listOf("PNG (투명 유지)", "JPEG (흰 배경)").forEachIndexed { i, l ->
+            val b = Ui.button(ctx, l) { fmt = i; fmtBtns.forEachIndexed { j, v -> Ui.setOn(v, j == i) } }
+            Ui.setOn(b, i == fmt)
+            fmtBtns.add(b)
+            fmtRow.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 4f) })
+        }
+        val sizeText = Ui.text(ctx, "", 12f, Ui.SUBTEXT)
+        val row = Ui.SliderRow(ctx, "크기", 190)
+        fun refresh() {
+            row.set(scale - 10, "$scale%")
+            sizeText.text = "${maxOf(1, w * scale / 100)} × ${maxOf(1, h * scale / 100)} px"
+        }
+        row.onChange = { p -> scale = p + 10; refresh() }
+        refresh()
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+            addView(fmtRow)
+            addView(row.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(ctx, 8f) })
+            addView(sizeText)
+        }
+        Ui.dialog(ctx)
+            .setTitle("이미지로 내보내기")
+            .setView(root)
+            .setPositiveButton("다음") { _, _ ->
+                exportFormat = fmt
+                exportScale = scale
+                exportPng()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -2096,12 +2148,33 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     private fun writePng(uri: Uri) {
         showHud("내보내는 중…")
+        val jpg = exportFormat == 1
+        val scale = exportScale
         renderer.captureFlattened { w, h, pixels ->
             io.execute {
                 try {
-                    contentResolver.openOutputStream(uri, "wt")?.use { ProjectIO.writePng(it, w, h, pixels) }
-                        ?: throw IllegalStateException("파일을 열 수 없습니다.")
-                    ui.post { showHud("PNG로 내보냈습니다") }
+                    contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                        if (!jpg && scale == 100) {
+                            ProjectIO.writePng(out, w, h, pixels)
+                        } else {
+                            var bmp = ProjectIO.toBitmap(w, h, pixels)
+                            if (scale != 100) {
+                                val s = android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, w * scale / 100), maxOf(1, h * scale / 100), true)
+                                if (s !== bmp) bmp.recycle()
+                                bmp = s
+                            }
+                            if (jpg) {
+                                // JPEG는 투명이 없으므로 흰 배경에 합침
+                                val flat = android.graphics.Bitmap.createBitmap(bmp.width, bmp.height, android.graphics.Bitmap.Config.ARGB_8888)
+                                android.graphics.Canvas(flat).apply { drawColor(Color.WHITE); drawBitmap(bmp, 0f, 0f, null) }
+                                bmp.recycle()
+                                bmp = flat
+                            }
+                            bmp.compress(if (jpg) android.graphics.Bitmap.CompressFormat.JPEG else android.graphics.Bitmap.CompressFormat.PNG, 92, out)
+                            bmp.recycle()
+                        }
+                    } ?: throw IllegalStateException("파일을 열 수 없습니다.")
+                    ui.post { showHud(if (jpg) "JPEG로 내보냈습니다" else "PNG로 내보냈습니다") }
                 } catch (e: Exception) {
                     Log.e(TAG, "export failed", e)
                     ui.post { Toast.makeText(this, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show() }
