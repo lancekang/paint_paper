@@ -451,7 +451,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
         group("파일")
         act(R.drawable.ic_file_new, "새 캔버스", Action.FILE_NEW)
-        act(R.drawable.ic_file_open, "열기", Action.FILE_OPEN)
+        barBtn(R.drawable.ic_file_open, "열기 (파일 · 자동 저장 기록)", Action.FILE_OPEN) {
+            Ui.dialog(this)
+                .setTitle("열기")
+                .setItems(arrayOf(tips.text("파일 열기…", Action.FILE_OPEN), "자동 저장 기록에서 열기 (최근 5개, 10분 간격)…")) { _, i ->
+                    if (i == 0) onShortcut(Action.FILE_OPEN) else chooseAutosaveHistory()
+                }
+                .setNegativeButton("닫기", null)
+                .show()
+        }
         act(R.drawable.ic_file_save, "저장", Action.FILE_SAVE)
         barBtn(R.drawable.ic_image_add, "이미지를 레이어로 가져오기 (가져온 뒤 크기·위치 맞추기)") { importImageLayer() }
         barBtn(R.drawable.ic_file_export, "내보내기 (PNG · JPEG · PSD · GIF)") { chooseExport() }
@@ -2488,6 +2496,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         try {
             val tmp = File(filesDir, "autosave.tmp")
             FileOutputStream(tmp).use { ProjectIO.writeDfp(it, data, composite) }
+            keepAutosaveHistory()
             if (!tmp.renameTo(autosaveFile)) {
                 autosaveFile.delete()
                 tmp.renameTo(autosaveFile)
@@ -2499,6 +2508,69 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         } catch (e: Exception) {
             Log.e(TAG, "autosave failed", e)
         }
+    }
+
+    // ---- 자동 저장 기록 (잘못 덮어써도 이전 상태로) ----
+
+    private val historyDir: File get() = File(filesDir, "autosave_history").apply { mkdirs() }
+
+    /**
+     * io 스레드. 지금 자동 저장본을 기록 폴더로 옮겨 둡니다 (가장 최근 기록보다 10분 이상 지났을 때만).
+     * 최대 [AUTOSAVE_KEEP]개, 오래된 것부터 지움.
+     */
+    private fun keepAutosaveHistory() {
+        val cur = autosaveFile
+        if (!cur.exists()) return
+        val files = historyDir.listFiles { f -> f.name.endsWith(".dfp") }?.sortedBy { it.lastModified() } ?: emptyList()
+        val newest = files.lastOrNull()?.lastModified() ?: 0L
+        if (cur.lastModified() - newest < 10 * 60 * 1000L) return
+        val name = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(cur.lastModified())) + ".dfp"
+        try {
+            cur.copyTo(File(historyDir, name), overwrite = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "autosave history copy failed", e)
+            return
+        }
+        val all = historyDir.listFiles { f -> f.name.endsWith(".dfp") }?.sortedBy { it.lastModified() } ?: return
+        for (i in 0 until all.size - AUTOSAVE_KEEP) all[i].delete()
+    }
+
+    /** 자동 저장 기록 목록에서 골라 엽니다 (지금 그림은 바뀌기 전에 자동 저장됨). */
+    private fun chooseAutosaveHistory() {
+        val files = (historyDir.listFiles { f -> f.name.endsWith(".dfp") }?.sortedByDescending { it.lastModified() } ?: emptyList())
+        if (files.isEmpty()) {
+            Toast.makeText(this, "아직 자동 저장 기록이 없습니다 (그리는 동안 10분 간격으로 남깁니다).", Toast.LENGTH_LONG).show()
+            return
+        }
+        val fmt = java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA)
+        val labels = files.map { "${fmt.format(java.util.Date(it.lastModified()))} · ${it.length() / 1024}KB" }.toTypedArray()
+        Ui.dialog(this)
+            .setTitle("자동 저장 기록에서 열기")
+            .setItems(labels) { _, i ->
+                confirmIfDirty {
+                    val f = files[i]
+                    showHud("여는 중…")
+                    val max = maxTex
+                    io.execute {
+                        try {
+                            val doc = f.inputStream().use { ProjectIO.readDfp(it, max) }
+                            ui.post {
+                                renderer.loadDocument(doc) { version ->
+                                    currentUri = null
+                                    currentName = null
+                                    savedVersion = -1L
+                                    updateTitle()
+                                    showHud("자동 저장 기록을 열었습니다. 필요하면 다른 이름으로 저장하세요")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            ui.post { Toast.makeText(this, "열지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show() }
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
     }
 
     /** 자동 저장본을 여는 중: 이때 그린 획은 복원된 문서에 덮여 사라지므로 캔버스 입력을 막습니다. */
@@ -2561,6 +2633,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         private const val REQ_IMPORT_LAYER = 17
         private const val REQ_BRUSH_EXPORT = 18
         private const val REQ_BRUSH_IMPORT = 19
+        /** 자동 저장 기록 개수 */
+        private const val AUTOSAVE_KEEP = 5
         /** GIF 긴 변 최대 크기 (px) */
         private const val GIF_MAX = 800
         private const val KEY_AUTOSAVE_CLEAN = "autosaveClean"
