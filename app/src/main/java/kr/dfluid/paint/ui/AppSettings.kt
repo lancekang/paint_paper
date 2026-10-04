@@ -161,7 +161,7 @@ class AppSettings(context: Context) {
         toolBarCollapsed = prefs.getBoolean("toolBarCollapsed", false)
         rightPanelCollapsed = prefs.getBoolean("rightPanelCollapsed", false)
         prefs.getString("recentColors", "")?.split(",")?.mapNotNull { it.toIntOrNull() }?.let { recentColors.addAll(it.take(MAX_RECENT)) }
-        colorTab = prefs.getInt("colorTab", 0).coerceIn(0, 3)
+        colorTab = prefs.getInt("colorTab", 0).coerceIn(0, 4)
         prefs.getString("mixCorners", null)?.split(",")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 4 }?.forEachIndexed { i, c -> mixCorners[i] = c }
         prefs.getString("palette", null)?.let { p ->
             palette.clear()

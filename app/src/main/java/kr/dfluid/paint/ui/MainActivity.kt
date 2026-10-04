@@ -123,6 +123,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     /** 선택 범위 런처: 선택 영역이 있을 때 아래에 뜨는 빠른 동작 */
     private lateinit var selBar: LinearLayout
     // ---- 내비게이터 ----
+    private lateinit var colorSliders: ColorSliders
     private lateinit var navPanel: LinearLayout
     private lateinit var navView: NavigatorView
     private lateinit var navBtn: ImageView
@@ -593,6 +594,11 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             onPick = { c -> setPrimary(c) }
             onChanged = { settings.save() }
         }
+        colorSliders = ColorSliders(ctx).apply {
+            color = settings.primaryColor
+            onLive = { c -> livePrimary(c) }
+            onCommit = { c -> setPrimary(c) }
+        }
         val colorTabs = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val tabButtons = ArrayList<TextView>()
         fun showColorTab(t: Int) {
@@ -601,9 +607,10 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             colorPicker.visibility = if (t <= 1) View.VISIBLE else View.GONE
             mixView.visibility = if (t == 2) View.VISIBLE else View.GONE
             setView.visibility = if (t == 3) View.VISIBLE else View.GONE
+            colorSliders.view.visibility = if (t == 4) View.VISIBLE else View.GONE
             tabButtons.forEachIndexed { i, b -> Ui.setOn(b, i == t) }
         }
-        listOf("서클", "사각형", "중간색", "세트").forEachIndexed { i, label ->
+        listOf("서클", "사각형", "중간색", "세트", "슬라이더").forEachIndexed { i, label ->
             val b = Ui.button(ctx, label) { showColorTab(i); settings.save() }
             tabButtons.add(b)
             colorTabs.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = Ui.dp(ctx, 3f) })
@@ -616,6 +623,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         colorCard.body.addView(colorPicker, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         colorCard.body.addView(mixView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         colorCard.body.addView(setView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        colorCard.body.addView(colorSliders.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         showColorTab(settings.colorTab)
         colorCard.body.addView(toolOptions.recentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = Ui.dp(ctx, 8f)
@@ -991,6 +999,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     private fun updateSwatches(syncPicker: Boolean = true) {
         if (syncPicker && colorPicker.color != settings.primaryColor) colorPicker.color = settings.primaryColor
+        if (::colorSliders.isInitialized && colorSliders.color != (settings.primaryColor or 0xFF000000.toInt())) colorSliders.color = settings.primaryColor
         val r = Ui.dp(this, 6f).toFloat()
         val stroke = Ui.dp(this, 2f)
         primarySwatch.background = Ui.rounded(settings.primaryColor, r, stroke, Color.WHITE)
