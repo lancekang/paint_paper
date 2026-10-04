@@ -1854,6 +1854,52 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         afterEdit()
     }
 
+    /** 선택 범위 밖을 마스크: 마스크(없으면 만들어서)를 "선택 밖 = 가림"으로 바꿉니다. 실행취소 한 단계 */
+    fun maskFromSelection() = post {
+        finishOp()
+        val d = doc ?: return@post
+        if (!hasSelection) {
+            reportError("선택 영역이 없습니다.")
+            return@post
+        }
+        val n = editableActive(allowVector = true) ?: return@post
+        val parts = ArrayList<HistoryCommand>()
+        if (!n.props.mask) {
+            val before = d.shape()
+            n.props = n.props.copy(mask = true, maskEnabled = true)
+            val cmd = StructureCommand(before, d.shape(), n.id, n.id)
+            cmd.redo(this) // applyShape가 surfaces[-id]를 만듭니다
+            parts.add(cmd)
+        } else if (!n.props.maskEnabled) {
+            val before = d.shape()
+            n.props = n.props.copy(maskEnabled = true)
+            parts.add(StructureCommand(before, d.shape(), n.id, n.id))
+        }
+        val ms = surfaces[-n.id] ?: return@post
+        val saved = HashMap<Int, ByteBuffer?>()
+        val sel = selTex!!.tex
+        for (key in ms.keysIntersecting(IRect(0, 0, d.width, d.height))) {
+            saved[key] = ms.read(key)
+            val t = ms.getOrCreate(key)
+            ms.bindCanvasSpace(key, t)
+            GlState.noScissor()
+            // 전부 가린 뒤 선택만큼 드러냄
+            GLES20.glClearColor(1f, 1f, 1f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GlState.erase()
+            compositor.drawMergeCoverage(sel, WHITE, 1f, 0, d.width, d.height)
+            GlState.off()
+            ms.dropIfEmpty(key)
+        }
+        saved.keys.toList().forEach { k -> if (saved[k] == null && ms.tiles[k] == null) saved.remove(k) }
+        if (saved.isNotEmpty()) parts.add(TilesCommand(-n.id, saved))
+        if (parts.isEmpty()) return@post
+        history.nextLabel = "선택 범위 밖을 마스크"
+        history.push(if (parts.size == 1) parts[0] else CompoundCommand(parts))
+        thumbQueue.add(-n.id)
+        afterEdit()
+    }
+
     /** 마스크 삭제 (실행취소하면 마스크 픽셀도 돌아옵니다). */
     fun deleteMask() = post {
         finishOp()

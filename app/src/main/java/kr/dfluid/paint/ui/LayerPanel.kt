@@ -676,6 +676,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.maskEnabled) "마스크 끄기" else "마스크 켜기",
             "마스크 적용 (가린 부분을 실제로 지움)",
             "마스크 삭제",
+            "선택 범위 밖을 마스크 (지금 마스크를 바꿈)",
         )
         Ui.dialog(ctx)
             .setTitle("레이어 마스크")
@@ -685,6 +686,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
                     1 -> renderer.setProps(info.id, p.copy(maskEnabled = !p.maskEnabled), record = true)
                     2 -> renderer.applyMask()
                     3 -> renderer.deleteMask()
+                    4 -> renderer.maskFromSelection()
                 }
             }
             .setNegativeButton("취소", null)

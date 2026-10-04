@@ -828,6 +828,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         sbText("컷", "컷 나누기: 선택 범위로 컷 폴더 만들기 (컷 영역 + 클리핑된 그림 + 테두리)", null) { chooseFrame() }
         sbText("테두리", "선택 범위 테두리 그리기 (주색, 굵기·위치)", null) { chooseSelectionBorder() }
         sbText("패턴", "선택 영역을 패턴으로 채우기 (점·줄·사선·격자·체크, 주색)", null) { choosePattern() }
+        sbText("마스크", "선택 범위 밖을 레이어 마스크로 가리기", null) { renderer.maskFromSelection() }
         sbText("저장", "선택 영역 저장 (나중에 불러오기)", null) {
             renderer.storeSelection { names -> showHud("${names.last()}(으)로 저장했습니다") }
         }
