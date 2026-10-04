@@ -54,7 +54,7 @@ class ColorPickerView(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, if (wheel) (w * 0.5f).toInt() else (w * heightRatio).toInt())
+        setMeasuredDimension(w, if (wheel) (w * 0.42f).toInt() else (w * heightRatio).toInt())
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

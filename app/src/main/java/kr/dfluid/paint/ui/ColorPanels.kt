@@ -48,7 +48,7 @@ class MixGridView(context: Context, private val corners: IntArray, private val c
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, (w * 0.45f).toInt())
+        setMeasuredDimension(w, (w * 0.4f).toInt())
     }
 
     private fun cellSize() = width.toFloat() / N to height.toFloat() / N
