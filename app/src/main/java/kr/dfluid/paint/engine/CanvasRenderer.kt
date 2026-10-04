@@ -1815,6 +1815,39 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         }
     }
 
+    /**
+     * 효과선(집중선·유선)을 새 벡터 레이어로 만듭니다 (활성 위). 기준 범위 = 선택 영역 경계, 없으면 캔버스.
+     * 선 하나하나가 벡터 선이라 지우개로 골라 지울 수 있습니다. 실행취소 한 단계.
+     */
+    fun createEffectLines(spec: EffectLineSpec, brush: Brush, color: Int) = post {
+        finishOp()
+        val d = doc ?: return@post
+        val area = selBounds?.takeIf { hasSelection } ?: IRect(0, 0, d.width, d.height)
+        val strokes = try {
+            EffectLines.generate(spec, area, d.width, d.height, brush.flow).map { VStroke(it, brush, color) }
+        } catch (e: OutOfMemoryError) {
+            reportError("메모리가 부족해 효과선을 만들지 못했습니다.")
+            return@post
+        }
+        if (strokes.isEmpty()) return@post
+        structural { doc ->
+            val a = doc.active
+            val parent = a?.parent ?: doc.root
+            val idx = if (a != null) a.index + 1 else parent.children.size
+            val n = Node(doc.newId(), NodeKind.RASTER, LayerProps(doc.nextLayerName(if (spec.kind == 0) "집중선" else "유선"), vector = true))
+            insert(parent, idx, n)
+            n.id
+        }
+        // 새 레이어의 픽셀·선은 구조 단계가 보관/복원 (실행취소하면 레이어째 빠짐)
+        val id = d.activeId
+        val s = surfaces[id] ?: return@post
+        vectors[id] = strokes
+        rasterStrokes(d, s, IRect(0, 0, d.width, d.height), strokes, HashMap())
+        thumbQueue.add(id)
+        belowValid = false
+        markAllDirty()
+    }
+
     fun addFolder() = post {
         finishOp()
         structural { d ->

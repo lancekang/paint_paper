@@ -491,6 +491,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         lineBtn = barBtn(R.drawable.ic_ruler, "직선 자 (시작점에서 끝점까지 곧은 선)") { toggleStraightLine() }
         symBtn = barBtn(R.drawable.ic_sym_vertical, "대칭") { cycleSymmetry() }
         rulerBtn = barBtn(R.drawable.ic_ruler_persp, "원근 자 · 동심원 자") { chooseRuler() }
+        barBtn(R.drawable.ic_effect_lines, "효과선 (집중선 · 유선을 새 벡터 레이어로)") { showEffectLines() }
         animBtn = barBtn(R.drawable.ic_film, "애니메이션 타임라인 (없으면 애니메이션 폴더를 만듦)") {
             if (!animExists) {
                 timelineOpen = true
@@ -1583,6 +1584,77 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     override fun onSelectionChanged(hasSelection: Boolean) {
         this.hasSelection = hasSelection
         updateSelBar()
+    }
+
+    // 효과선 대화상자 값 (앱을 켜 둔 동안 기억)
+    private var elKind = 0
+    private var elCount = 120
+    private var elWidth = 6
+    private var elJitter = 50
+    private var elAngle = 0
+    private var elTaper = true
+
+    /** 효과선 만들기: 펜(보조 도구) 모양 + 주색으로, 선택 영역이 있으면 그 범위를 기준으로 */
+    private fun showEffectLines() {
+        val ctx = this
+        val pad = Ui.dp(ctx, 20f)
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+        }
+        fun slider(label: String, min: Int, max: Int, get: () -> Int, set: (Int) -> Unit, fmt: (Int) -> String): Ui.SliderRow {
+            val row = Ui.SliderRow(ctx, label, max - min)
+            row.set(get() - min, fmt(get()))
+            row.onChange = { p -> set(p + min); row.set(p, fmt(p + min)) }
+            body.addView(row.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = Ui.dp(ctx, 4f)
+            })
+            return row
+        }
+        val kinds = android.widget.RadioGroup(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val names = listOf("집중선", "유선")
+        lateinit var angleRow: Ui.SliderRow
+        names.forEachIndexed { i, n ->
+            kinds.addView(android.widget.RadioButton(ctx).apply {
+                id = 7100 + i
+                text = n
+                setTextColor(Ui.TEXT)
+                isChecked = i == elKind
+            })
+        }
+        kinds.setOnCheckedChangeListener { _, checked ->
+            elKind = checked - 7100
+            angleRow.view.visibility = if (elKind == 1) View.VISIBLE else View.GONE
+        }
+        body.addView(kinds)
+        slider("선 수", 10, 400, { elCount }, { elCount = it }) { "$it" }
+        slider("굵기", 1, 40, { elWidth }, { elWidth = it }) { "${it}px" }
+        slider("흔들림", 0, 100, { elJitter }, { elJitter = it }) { "$it%" }
+        angleRow = slider("방향", 0, 179, { elAngle }, { elAngle = it }) { "$it°" }
+        angleRow.view.visibility = if (elKind == 1) View.VISIBLE else View.GONE
+        body.addView(android.widget.CheckBox(ctx).apply {
+            text = "끝을 가늘게 (입·출)"
+            setTextColor(Ui.TEXT)
+            isChecked = elTaper
+            setOnCheckedChangeListener { _, c -> elTaper = c }
+        })
+        body.addView(Ui.text(ctx, "선택 영역이 있으면 그 범위가 기준입니다 (집중선 = 가운데 빈 곳, 유선 = 그리는 범위). 결과는 새 벡터 레이어라 지우개로 선을 하나씩 지울 수 있습니다.", 11.5f, Ui.MUTED).apply {
+            setPadding(0, Ui.dp(ctx, 6f), 0, 0)
+        })
+        Ui.dialog(ctx)
+            .setTitle("효과선")
+            .setView(body)
+            .setPositiveButton("만들기") { _, _ ->
+                val brush = library.active(Tool.PEN)?.copy() ?: return@setPositiveButton
+                val spec = kr.dfluid.paint.engine.EffectLineSpec(
+                    elKind, elCount, elWidth.toFloat(), elJitter / 100f, elAngle.toFloat(), elTaper, System.nanoTime(),
+                )
+                renderer.createEffectLines(spec, brush, settings.primaryColor)
+                showHud(if (elKind == 0) "집중선을 만들었습니다" else "유선을 만들었습니다")
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     /** 작업 내역 창: 단계 목록에서 고르면 그 상태로 실행취소/다시실행 */
