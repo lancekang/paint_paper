@@ -149,6 +149,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             add(if (info.props.borderWidth > 0f) "경계 효과 (테두리) · ${info.props.borderWidth.roundToInt()}px…" else "경계 효과 (테두리)…") { borderDialog(info) }
             add(if (info.props.toneCell > 0f) "톤 효과 (망점) · 켜짐…" else "톤 효과 (망점)…") { toneDialog(info) }
             add(if (info.props.paperStrength > 0f) "용지 질감 · 켜짐…" else "용지 질감 (종이 결)…") { paperDialog(info) }
+            add(if (info.props.wcWidth > 0f) "수채 경계 · ${info.props.wcWidth.roundToInt()}px…" else "수채 경계 (가장자리 진하게)…") { watercolorDialog(info) }
             add(if (info.props.layerColorOn) "레이어 컬러 끄기" else "레이어 컬러 (밑그림을 파랗게 등)…") {
                 if (info.props.layerColorOn) renderer.setProps(info.id, info.props.copy(layerColorOn = false), record = true)
                 else layerColorDialog(info)
@@ -242,6 +243,47 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             .setPositiveButton("확인") { _, _ -> if (pct != 100) renderer.scaleVectorWidth(info.id, pct / 100f) }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    /** 수채 경계: 폭·진하기를 미리보며 */
+    private fun watercolorDialog(info: NodeInfo) {
+        val start = info.props
+        var width = if (start.wcWidth > 0f) start.wcWidth else 6f
+        var strength = start.wcStrength
+        fun apply(record: Boolean) = renderer.setProps(info.id, start.copy(wcWidth = width, wcStrength = strength), record, if (record) start else null)
+        val pad = Ui.dp(ctx, 20f)
+        val wRow = Ui.SliderRow(ctx, "폭", 40)
+        wRow.set(width.roundToInt(), "${width.roundToInt()}px")
+        wRow.onChange = { p -> width = p.toFloat().coerceAtLeast(1f); wRow.set(p, "${width.roundToInt()}px"); apply(false) }
+        val sRow = Ui.SliderRow(ctx, "진하기", 100)
+        sRow.set((strength * 100).roundToInt(), "${(strength * 100).roundToInt()}%")
+        sRow.onChange = { p -> strength = p / 100f; sRow.set(p, "$p%"); apply(false) }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            minimumWidth = Ui.dp(ctx, 380f)
+            addView(wRow.view)
+            addView(sRow.view)
+            addView(Ui.text(ctx, "칠한 부분의 가장자리를 진하게 해 수채화처럼 물감이 고인 느낌을 냅니다. 픽셀은 그대로입니다.", 11.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(ctx, 8f), 0, 0) })
+        }
+        var done = false
+        val dlg = Ui.dialog(ctx)
+            .setTitle("수채 경계 · ${info.props.name}")
+            .setView(root)
+            .setPositiveButton("확인") { _, _ -> done = true; apply(true) }
+            .setNeutralButton("효과 끄기") { _, _ ->
+                done = true
+                renderer.setProps(info.id, start.copy(wcWidth = 0f), true, start)
+            }
+            .setNegativeButton("취소", null)
+            .create()
+        dlg.setOnDismissListener { if (!done) renderer.setProps(info.id, start, false) }
+        dlg.window?.let { w ->
+            w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setGravity(Gravity.BOTTOM)
+        }
+        dlg.show()
+        apply(false)
     }
 
     /** 용지 질감: 종류·세기·결 크기를 미리보며 */
@@ -527,6 +569,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             if (p.locked) append(" · 잠김")
             if (p.draft) append(" · 밑그림")
             if (p.paperStrength > 0f) append(" · 질감")
+            if (p.wcWidth > 0f) append(" · 수채")
             if (p.borderWidth > 0f) append(" · 경계")
             if (p.toneCell > 0f) append(" · 톤")
             if (p.layerColorOn) append(" · 레이어 컬러")

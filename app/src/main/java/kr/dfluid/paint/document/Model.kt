@@ -67,6 +67,9 @@ data class LayerProps(
     val paperStrength: Float = 0f,
     val paperScale: Float = 1f,
     val paperKind: Int = 0,
+    /** 레이어 효과 "수채 경계": 폭(px, 0 = 끔)과 진하기 0..1 */
+    val wcWidth: Float = 0f,
+    val wcStrength: Float = 0.6f,
 )
 
 /** UI에 보여주는 한 줄. 목록은 위 → 아래(화면 순서), depth = 폴더 깊이. */

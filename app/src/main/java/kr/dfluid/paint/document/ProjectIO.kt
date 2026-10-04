@@ -66,6 +66,7 @@ object ProjectIO {
                 if (n.props.animation) o.put("animation", true)
                 if (n.props.locked) o.put("locked", true)
                 if (n.props.draft) o.put("draft", true)
+                if (n.props.wcWidth > 0f) o.put("wcWidth", n.props.wcWidth.toDouble()).put("wcStrength", n.props.wcStrength.toDouble())
                 if (n.props.paperStrength > 0f) o.put("paperStrength", n.props.paperStrength.toDouble()).put("paperScale", n.props.paperScale.toDouble()).put("paperKind", n.props.paperKind)
                 if (n.props.vector) o.put("vector", true).put("vectorFile", "layers/${n.id}.vec")
                 if (n.props.layerColorOn) o.put("layerColorOn", true).put("layerColor", n.props.layerColor)
@@ -231,6 +232,8 @@ object ProjectIO {
         paperStrength = o.optDouble("paperStrength", 0.0).toFloat().coerceIn(0f, 1f),
         paperScale = o.optDouble("paperScale", 1.0).toFloat().coerceIn(0.25f, 8f),
         paperKind = o.optInt("paperKind", 0).coerceIn(0, 2),
+        wcWidth = o.optDouble("wcWidth", 0.0).toFloat().coerceIn(0f, 40f),
+        wcStrength = o.optDouble("wcStrength", 0.6).toFloat().coerceIn(0f, 1f),
     )
 
     /** PNG/JPEG/WebP 이미지를 레이어 한 장짜리 새 문서로 엽니다. 너무 크면 줄입니다. */

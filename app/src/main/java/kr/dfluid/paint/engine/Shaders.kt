@@ -504,6 +504,32 @@ void main() {
 """
 
     /**
+     * 수채 경계: 둘레 16곳의 평균 알파보다 진한 곳(= 가장자리)을 더 어둡게 해 물감이 고인 듯이.
+     */
+    const val WATERCOLOR_FS = """#version 300 es
+precision highp float;
+in vec2 v_cuv;
+uniform sampler2D u_src;
+uniform vec2 u_texel;
+uniform float u_width;
+uniform float u_strength;
+out vec4 o;
+void main() {
+    vec4 s = texture(u_src, v_cuv);
+    if (s.a <= 0.0) { o = s; return; }
+    float acc = 0.0;
+    for (int i = 0; i < 16; i++) {
+        float ang = float(i) * 0.39269908;
+        float r = (i % 2 == 0) ? u_width : u_width * 0.5;
+        acc += texture(u_src, v_cuv + vec2(cos(ang), sin(ang)) * r * u_texel).a;
+    }
+    float edge = clamp((s.a - acc / 16.0) * 2.0, 0.0, 1.0);
+    float k = edge * u_strength;
+    o = vec4(s.rgb * (1.0 - 0.6 * k), s.a);
+}
+"""
+
+    /**
      * 용지 질감: 종이 결(절차적 잡음)만큼 레이어의 알파를 깎아 결이 보이게 (캔버스 좌표 고정이라 옮겨도 결은 그대로).
      * u_kind 0 종이(고운 결), 1 캔버스 천(격자 무늬), 2 거친 종이
      */

@@ -198,6 +198,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     private var colorBuf: RenderTarget? = null
     /** 용지 질감 결과 버퍼 */
     private var paperBuf: RenderTarget? = null
+    /** 수채 경계 결과 버퍼 */
+    private var wcBuf: RenderTarget? = null
     private var smudgePatch: RenderTarget? = null
     var defaultWidth = 2048
     var defaultHeight = 2048
@@ -1909,7 +1911,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         add(strokeBuf); add(selTex); add(preview); add(belowCache); add(maskTmp); add(tileTmp); add(thumbTarget)
         add(smudgeBuf); add(smudgePatch)
         borderBufs?.forEach { add(it) }
-        add(toneBuf); add(colorBuf); add(paperBuf)
+        add(toneBuf); add(colorBuf); add(paperBuf); add(wcBuf)
         pairs.forEach { add(it.a); add(it.b) }
         (op as? Op.Filter)?.let { add(it.orig); add(it.work); add(it.result) }
         return String.format(
@@ -2173,6 +2175,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         navSent = -1L
         colorBuf?.release(); colorBuf = null
         paperBuf?.release(); paperBuf = null
+        wcBuf?.release(); wcBuf = null
         smudgePatch?.release(); smudgePatch = null
         maskEditing = false
         pairs.forEach { it.release() }
@@ -2206,6 +2209,7 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         navSent = -1L
         colorBuf = null
         paperBuf = null
+        wcBuf = null
         if (op is Op.Filter) main.post { listener.onFilterEnded() }
         op = null
         doc = null
@@ -3245,7 +3249,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 보이는 레이어 중 가장 굵은 경계 효과가 닿는 거리 (px, 없으면 0) */
     private fun borderReach(d: Document): Int {
         var m = 0f
-        for (n in d.allNodes()) if (n.isRaster && n.props.borderWidth > 0f && n.props.visible) m = max(m, n.props.borderWidth)
+        // 경계 효과와 수채 경계는 둘레를 읽으므로 둘 다 더한 거리만큼
+        for (n in d.allNodes()) if (n.isRaster && n.props.visible) m = max(m, n.props.borderWidth + n.props.wcWidth)
         return if (m > 0f) kotlin.math.ceil(m).toInt() + 2 else 0
     }
 
@@ -3270,6 +3275,31 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         GlState.scissor(r)
         GlState.off()
         compositor.drawColorize(srcTex.tex, color)
+        GlState.noScissor()
+        return Src.Tex(out)
+    }
+
+    /** 수채 경계 적용 소스 ([r] 영역에 씀, [src]는 r보다 폭만큼 넓게 준비돼 있어야 함) */
+    private fun watercolorSrc(n: Node, src: Src, r: IRect, wide: IRect): Src {
+        val d = doc!!
+        val b = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
+        val srcTex = when (src) {
+            is Src.Tex -> src.t
+            is Src.Tiles -> {
+                b[0].clear(wide)
+                b[0].bind()
+                GlState.scissor(wide)
+                GlState.off()
+                drawSourceCopy(src, 1f, wide)
+                GlState.noScissor()
+                b[0]
+            }
+        }
+        val out = wcBuf ?: RenderTarget(d.width, d.height).also { wcBuf = it }
+        out.bind()
+        GlState.scissor(r)
+        GlState.off()
+        compositor.drawWatercolor(srcTex.tex, d.width, d.height, n.props.wcWidth, n.props.wcStrength)
         GlState.noScissor()
         return Src.Tex(out)
     }
@@ -3329,8 +3359,15 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val toned = n.props.toneCell > 0f
         val colored = n.props.layerColorOn
         val papered = n.props.paperStrength > 0f
+        val wc = n.props.wcWidth
         if (bw <= 0f) {
-            var m = maskedSrc(n, r)
+            var m: Src
+            if (wc > 0f) {
+                val d = doc!!
+                val k = kotlin.math.ceil(wc).toInt() + 1
+                val wide = IRect.ofBounds((r.x - k).toFloat(), (r.y - k).toFloat(), (r.right + k).toFloat(), (r.bottom + k).toFloat(), d.width, d.height) ?: r
+                m = watercolorSrc(n, maskedSrc(n, wide), r, wide)
+            } else m = maskedSrc(n, r)
             if (papered) m = paperSrc(n, m, r)
             if (colored) m = colorizeSrc(n, m, r)
             return if (toned) toneSrc(n, m, r) else m
@@ -3338,7 +3375,12 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val d = doc!!
         val reach = kotlin.math.ceil(bw).toInt() + 1
         val er = IRect.ofBounds((r.x - reach).toFloat(), (r.y - reach).toFloat(), (r.right + reach).toFloat(), (r.bottom + reach).toFloat(), d.width, d.height) ?: r
-        val src = maskedSrc(n, er).let { if (papered) paperSrc(n, it, er) else it }.let { if (colored) colorizeSrc(n, it, er) else it }.let { if (toned) toneSrc(n, it, er) else it }
+        val first = if (wc > 0f) {
+            val k = kotlin.math.ceil(wc).toInt() + 1
+            val wide = IRect.ofBounds((er.x - k).toFloat(), (er.y - k).toFloat(), (er.right + k).toFloat(), (er.bottom + k).toFloat(), d.width, d.height) ?: er
+            watercolorSrc(n, maskedSrc(n, wide), er, wide)
+        } else maskedSrc(n, er)
+        val src = first.let { if (papered) paperSrc(n, it, er) else it }.let { if (colored) colorizeSrc(n, it, er) else it }.let { if (toned) toneSrc(n, it, er) else it }
         val bufs = borderBufs ?: Array(3) { RenderTarget(d.width, d.height) }.also { borderBufs = it }
         // 이웃을 읽으려면 텍스처여야 합니다 (타일이면 한 장에 모음).
         val srcTex = when (src) {
