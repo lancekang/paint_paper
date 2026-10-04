@@ -459,7 +459,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
         colorCard = Ui.Card(ctx, "색", settings.cardColorOpen) { open -> settings.cardColorOpen = open; relayoutCards() }
         colorPicker = ColorPickerView(ctx).apply {
-            heightRatio = 0.55f
+            heightRatio = 0.42f
             color = settings.primaryColor
             onColorChanged = { c -> livePrimary(c) }
             onColorCommitted = { c -> setPrimary(c) }
@@ -556,9 +556,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             (if (open && weight > 0f) LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, weight)
             else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 .apply { if (!last) bottomMargin = gap }
-        toolCard.view.layoutParams = lp(toolCard.open, 0.9f, false)
+        toolCard.view.layoutParams = lp(toolCard.open, 1f, false)
         colorCard.view.layoutParams = lp(colorCard.open, 0f, false)
-        layerCard.view.layoutParams = lp(layerCard.open, 1.1f, true)
+        layerCard.view.layoutParams = lp(layerCard.open, 1f, true)
         rightPanel.requestLayout()
     }
 

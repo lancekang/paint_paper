@@ -37,6 +37,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
     private var opacityRow: Ui.SliderRow? = null
     private var hardnessRow: Ui.SliderRow? = null
     private var smoothingRow: Ui.SliderRow? = null
+    private var taperInRow: Ui.SliderRow? = null
+    private var taperOutRow: Ui.SliderRow? = null
     private val recentRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
 
     /** 카드 머리글 제목 (MainActivity가 연결). 없으면 본문 맨 위에 제목을 넣습니다. */
@@ -65,7 +67,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun rebuild() {
         view.removeAllViews()
-        sizeRow = null; opacityRow = null; hardnessRow = null; smoothingRow = null
+        sizeRow = null; opacityRow = null; hardnessRow = null; smoothingRow = null; taperInRow = null; taperOutRow = null
         val title = if (tool.isBrush) "보조 도구 · ${tool.label}" else "도구 속성 · ${tool.label}"
         titleView?.let { it.text = title } ?: view.addView(Ui.text(ctx, title, 14f, bold = true))
         when {
@@ -158,6 +160,12 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val op = Ui.SliderRow(ctx, "불투명도", 100)
         val hard = Ui.SliderRow(ctx, "경도", 100)
         val smooth = Ui.SliderRow(ctx, "손떨림 보정", 100)
+        val tIn = Ui.SliderRow(ctx, "입 (시작)", Brush.TAPER_MAX.toInt())
+        val tOut = Ui.SliderRow(ctx, "출 (끝)", Brush.TAPER_MAX.toInt())
+        taperInRow = tIn; taperOutRow = tOut
+        tIn.onChange = { p -> lib.active(tool)?.let { it.taperIn = p.toFloat(); refresh() } }
+        tOut.onChange = { p -> lib.active(tool)?.let { it.taperOut = p.toFloat(); refresh() } }
+        listOf(tIn, tOut).forEach { r -> r.onStop = { lib.save() } }
         sizeRow = size; opacityRow = op; hardnessRow = hard; smoothingRow = smooth
         size.onChange = { p -> lib.active(tool)?.let { it.size = sliderToSize(p); refresh(); host.onBrushChanged() } }
         op.onChange = { p -> lib.active(tool)?.let { it.opacity = (p / 100f).coerceAtLeast(0.01f); refresh() } }
@@ -169,14 +177,14 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val details = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (detailsOpen) View.VISIBLE else View.GONE
-            for (r in listOf(hard, smooth)) addView(r.view, lp())
+            for (r in listOf(hard, smooth, tIn, tOut)) addView(r.view, lp())
         }
         val toggle = Ui.text(ctx, "", 12f, Ui.SUBTEXT).apply {
             val p = Ui.dp(ctx, 4f)
             setPadding(0, p, 0, p)
             isClickable = true
         }
-        fun label() { toggle.text = if (detailsOpen) "세부 설정 ▴" else "세부 설정 (경도, 손떨림 보정) ▾" }
+        fun label() { toggle.text = if (detailsOpen) "세부 설정 ▴" else "세부 설정 (경도, 손떨림 보정, 입·출) ▾" }
         label()
         toggle.setOnClickListener {
             detailsOpen = !detailsOpen
@@ -229,6 +237,8 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
             opacityRow?.set(op, "$op%")
             val hd = (b.hardness * 100).roundToInt()
             hardnessRow?.set(hd, "$hd%")
+            taperInRow?.set(b.taperIn.roundToInt(), if (b.taperIn < 0.5f) "끔" else "${b.taperIn.roundToInt()}px")
+            taperOutRow?.set(b.taperOut.roundToInt(), if (b.taperOut < 0.5f) "끔" else "${b.taperOut.roundToInt()}px")
         }
         val sm = (host.settings.smoothing / 0.95f * 100).roundToInt()
         smoothingRow?.set(sm, "$sm")

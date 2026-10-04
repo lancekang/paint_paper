@@ -40,6 +40,8 @@ enum class TipRotation(val label: String) {
  * @property buildUp true면 한 획 안에서 겹칠수록 진해짐(에어브러시), false면 최댓값 유지(펜)
  * @property tipId 사용자 팁 이미지 id (null = 원형)
  * @property curve 필압 곡선 제어점 [x0,y0,x1,y1,...] (0..1, x 오름차순)
+ * @property taperIn 입: 시작부터 이 길이(캔버스 px) 동안 가늘게 시작 (0 = 끔)
+ * @property taperOut 출: 끝에서 이 길이 동안 가늘게 끝남 (0 = 끔)
  */
 data class Brush(
     val id: String,
@@ -64,6 +66,8 @@ data class Brush(
     var angleJitter: Float = 0f,
     var sizeJitter: Float = 0f,
     var curve: FloatArray = floatArrayOf(0f, 0f, 1f, 1f),
+    var taperIn: Float = 0f,
+    var taperOut: Float = 0f,
 ) {
     val isEraser: Boolean get() = tool == Tool.ERASER
 
@@ -110,6 +114,8 @@ data class Brush(
         .put("angleJitter", angleJitter.toDouble())
         .put("sizeJitter", sizeJitter.toDouble())
         .put("curve", JSONArray(curve.map { it.toDouble() }))
+        .put("taperIn", taperIn.toDouble())
+        .put("taperOut", taperOut.toDouble())
 
     override fun equals(other: Any?): Boolean = other is Brush && other.toJson().toString() == toJson().toString()
     override fun hashCode(): Int = id.hashCode()
@@ -117,6 +123,8 @@ data class Brush(
     companion object {
         const val MIN_SIZE = 1f
         const val MAX_SIZE = 1000f
+        /** 입·출 최대 길이 (캔버스 px) */
+        const val TAPER_MAX = 400f
 
         fun fromJson(o: JSONObject): Brush? {
             val tool = Tool.entries.firstOrNull { it.name == o.optString("tool") } ?: return null
@@ -148,6 +156,8 @@ data class Brush(
                 angleJitter = f("angleJitter", 0f).coerceIn(0f, 1f),
                 sizeJitter = f("sizeJitter", 0f).coerceIn(0f, 1f),
                 curve = curve,
+                taperIn = f("taperIn", 0f).coerceIn(0f, TAPER_MAX),
+                taperOut = f("taperOut", 0f).coerceIn(0f, TAPER_MAX),
             )
         }
     }

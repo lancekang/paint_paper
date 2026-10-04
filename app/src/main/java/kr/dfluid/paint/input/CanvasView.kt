@@ -74,6 +74,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     var stylusSeen = false
         private set
     private val builder = StrokeBuilder()
+    // 선 입·출 처리
+    private val taper = StrokeTaper()
+
     // 직선 자
     private var lineMode = false
     private var lineBrush: Brush? = null
@@ -305,7 +308,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     updateLine(tmp[0], tmp[1], h)
                 } else {
                     builder.begin(brush, h.smoothing, tmp[0], tmp[1], p, tl, an)
-                    builder.drain()?.let { emitStamps(it, h) }
+                    taper.begin(brush.taperIn, brush.taperOut)
+                    builder.drain()?.let { emitStamps(taper.push(it), h) }
                 }
                 h.onStrokeStarted()
             }
@@ -324,12 +328,22 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         }
     }
 
-    /** 직선 자: 시작점→(cx,cy) 직선을 만들어 스트로크 버퍼를 통째로 갱신합니다. 대칭 복제본 포함. */
+    /** 직선 자: 시작점→(cx,cy) 직선을 만들어 스트로크 버퍼를 통째로 갱신합니다. 대칭 복제본·입출 포함. */
     private fun updateLine(cx: Float, cy: Float, h: Host) {
         val brush = lineBrush ?: return
         builder.begin(brush, 0f, lineStartX, lineStartY, linePressure, lineTilt, lineAngle)
         builder.add(cx, cy, linePressure, lineTilt, lineAngle)
-        val base = builder.drain() ?: FloatArray(0)
+        var base = builder.drain() ?: FloatArray(0)
+        if (brush.taperIn > 0f || brush.taperOut > 0f) {
+            taper.begin(brush.taperIn, brush.taperOut)
+            taper.push(base)
+            base = taper.renderAll()
+        }
+        replaceStroke(base, h)
+    }
+
+    /** 스트로크 버퍼 전체를 [base] (+ 대칭 복제본)로 바꿉니다. */
+    private fun replaceStroke(base: FloatArray, h: Host) {
         val mirrors = if (h.symmetry.on) h.symmetry.mirror(base, viewport.canvasW / 2f, viewport.canvasH / 2f) else emptyList()
         if (mirrors.isEmpty()) {
             renderer.setStrokeLine(base)
@@ -364,7 +378,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     }
                     viewport.toCanvas(e.getX(i), e.getY(i), tmp)
                     builder.add(tmp[0], tmp[1], pressure(e, i, -1, h), tilt(e, i, -1), angle(e, i, -1))
-                    builder.drain()?.let { emitStamps(it, h) }
+                    builder.drain()?.let { emitStamps(taper.push(it), h) }
                 }
             }
             Mode.PICK -> {
@@ -447,7 +461,9 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                     lineBrush = null
                 } else {
                     builder.finish()
-                    builder.drain()?.let { emitStamps(it, h) }
+                    builder.drain()?.let { emitStamps(taper.push(it), h) }
+                    // 출: 끝이 정해졌으니 획 전체를 끝이 가늘어지게 다시 그립니다.
+                    taper.finish()?.let { replaceStroke(it, h) }
                 }
                 renderer.endStroke()
             }

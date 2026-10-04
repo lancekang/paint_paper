@@ -92,6 +92,13 @@ object BrushEditor {
             setOnCheckedChangeListener { _, c -> b.buildUp = c }
         })
 
+        // ---- 입·출 ----
+        section("입·출 (선 끝 가늘게)")
+        val px = { v: Float -> if (v < 0.5f) "끔" else "${v.roundToInt()}px" }
+        param("입 (시작)", 0f, Brush.TAPER_MAX, { b.taperIn }, { b.taperIn = it }, px)
+        param("출 (끝)", 0f, Brush.TAPER_MAX, { b.taperOut }, { b.taperOut = it }, px)
+        root.addView(Ui.text(ctx, "필압과 상관없이 선의 시작·끝을 가늘게 합니다. 출은 펜을 뗄 때 적용됩니다.", 11f, Ui.SUBTEXT))
+
         // ---- 필압 ----
         section("필압")
         param("크기 영향", 0f, 1f, { b.pressureSize }, { b.pressureSize = it }, pct)
@@ -225,6 +232,8 @@ object BrushEditor {
                 original.angleDeg = b.angleDeg
                 original.angleJitter = b.angleJitter
                 original.sizeJitter = b.sizeJitter
+                original.taperIn = if (b.taperIn < 0.5f) 0f else b.taperIn
+                original.taperOut = if (b.taperOut < 0.5f) 0f else b.taperOut
                 library.save()
                 onSaved()
             }
