@@ -487,7 +487,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
-            setPadding(m, m / 2 + 2, m, m / 2)
+            setPadding(m, m / 2 + 2, m, m / 2 + 4)
             background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
         }
         titleLabel = Ui.text(ctx, "", 13f, Ui.TEXT, bold = true).apply {
@@ -498,7 +498,8 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         }
         val topGrip = FloatingPanels.Grip(ctx, horizontal = false)
         bar.addView(topGrip, LinearLayout.LayoutParams(Ui.dp(ctx, 16f), Ui.dp(ctx, 40f)).apply {
-            gravity = Gravity.CENTER_VERTICAL
+            // 묶음 상자(40dp)와 같은 높이·같은 줄에 (위 이름표 줄은 빼고)
+            gravity = Gravity.BOTTOM
             rightMargin = Ui.dp(ctx, 2f)
         })
         topToggle = Ui.iconButton(ctx, R.drawable.ic_chevron_left, "상단 바 접기/펼치기", 32f, ghost = true) {
@@ -507,11 +508,12 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             applyCollapse()
         }
         bar.addView(topToggle, LinearLayout.LayoutParams(Ui.dp(ctx, 32f), Ui.dp(ctx, 40f)).apply {
-            gravity = Gravity.CENTER_VERTICAL
+            // 묶음 상자(40dp)와 같은 높이·같은 줄에 (위 이름표 줄은 빼고)
+            gravity = Gravity.BOTTOM
             rightMargin = Ui.dp(ctx, 4f)
         })
         val topBodyStart = bar.childCount
-        bar.addView(titleLabel)
+        // 문서 이름은 상단 바에 두지 않음 (저장·열기 때 알림으로 보여 줌, titleLabel은 이름을 기억하는 데만 씀)
         var group = LinearLayout(ctx)
         topGroups.clear()
         fun group(label: String): TextView {
@@ -521,11 +523,12 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 setPadding(p, p, p, p)
                 background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
             }
-            val name = Ui.text(ctx, label, 10.5f, Ui.MUTED).apply { setPadding(Ui.dp(ctx, 5f), Ui.dp(ctx, 2f), 0, 0) }
+            // 이름표는 상자 위에 (묶음 제목)
+            val name = Ui.text(ctx, label, 10.5f, Ui.MUTED).apply { setPadding(Ui.dp(ctx, 5f), 0, 0, Ui.dp(ctx, 3f)) }
             val outer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(icons)
                 addView(name)
+                addView(icons)
             }
             bar.addView(outer, Ui.wrap().apply { rightMargin = Ui.dp(ctx, 8f) })
             topGroups.add(TopGroup(label, outer, icons, name))
@@ -3130,7 +3133,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                         settings.save()
                         savedVersion = version
                         updateTitle()
-                        showHud("저장했습니다")
+                        showHud("\"${currentName ?: "그림"}\"(으)로 저장했습니다")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "save failed", e)
@@ -3169,6 +3172,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                         settings.lastUri = currentUri?.toString()
                         savedVersion = version
                         updateTitle()
+                        showHud("\"${displayName(uri) ?: "그림"}\"을(를) 열었습니다")
                     }
                 }
             } catch (e: OutOfMemoryError) {

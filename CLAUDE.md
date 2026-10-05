@@ -77,6 +77,7 @@
 - AndroidX를 추가하지 않습니다. UI는 코드로 만든 프레임워크 위젯(`ui/Ui.kt` 도우미).
 - **색은 하드코딩하지 말고 `Ui.TEXT/CARD/BUTTON_ON…`** (라이트/다크 테마, `Ui.applyTheme`). 대화상자는 `Ui.dialog(ctx)`(`ui/DialogStyle.kt`의 StyledDialogBuilder가 만들 때 앱 카드 모양으로 꾸밈: 둥근 카드·제목 강조 막대·채운 확인 버튼·둥근 목록 행·안의 위젯 강조색. 시스템 AlertDialog.Builder를 직접 쓰지 말 것), 아이콘은 `Ui.iconButton`(ghost = 묶음 안), 드롭다운은 `Ui.styleSpinner`, 슬라이더는 `Ui.styleSeek`.
 - 테마가 바뀌면 `MainActivity.rebuildUi()`가 캔버스(GLSurfaceView)는 그대로 두고 둘레 UI(`buildChrome`)만 다시 만듭니다. **GLSurfaceView를 떼면 GL 컨텍스트를 잃으니 절대 떼지 말 것.**
+- 상단 바 묶음: 이름표는 상자 위, 문서 이름은 상단 바에 두지 않음(저장·열기 때 알림으로). 
 - 막대가 화면을 넘칠 때: 도구 막대는 한 줄 높이가 화면보다 크면 2열(`toolTwoCol`), 상단 바는 `fitTopBar`가 오른쪽 묶음부터 "이름 ▾" 버튼으로 접고 누르면 PopupWindow로 펼침(`TopGroup`). 도구·버튼은 숨기지 않음.
 - 떠 있는 패널(상단 바·도구 막대·오른쪽 패널)의 위치는 `ui/FloatingPanels.kt`가 view.x/y로 정합니다. LayoutParams는 TOP|START에 두고 여백으로 위치를 박지 말 것. 위치는 남는 공간 비율(0/0.5/1 = 시작/가운데/끝)로 `AppSettings.topBarFx…`에 저장.
 - GL 호출은 **GL 스레드에서만**. UI 스레드는 `CanvasRenderer`의 public 메서드(명령 큐에 post)만 호출하고, 결과는 `Listener` 콜백(메인 스레드)으로 받습니다.
