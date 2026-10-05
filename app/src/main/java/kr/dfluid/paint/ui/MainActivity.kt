@@ -181,6 +181,82 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
     // 패널 접기: 접으면 숨길 뷰들과 접기/펼치기 버튼
     private val topBarBody = ArrayList<View>()
     private val toolBarBody = ArrayList<View>()
+    /** 도구 막대를 2열로 만들었는지 (화면 높이가 모자랄 때) */
+    private var toolTwoCol = false
+
+    /** 상단 바 묶음: 넘치면 [icons]를 떼어 내고 "이름 ▾" 버튼을 넣어 누르면 펼침 */
+    private class TopGroup(val label: String, val outer: LinearLayout, val icons: LinearLayout, val name: TextView) {
+        var chip: View? = null
+    }
+    private val topGroups = ArrayList<TopGroup>()
+    private var topBarRow: LinearLayout? = null
+    private var topPopup: android.widget.PopupWindow? = null
+
+    private fun fitTopBar() {
+        val bar = topBarRow ?: return
+        val avail = rootView.width - Ui.dp(this, 24f)
+        if (avail <= 0) return
+        fun measure(): Int {
+            bar.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+            return bar.measuredWidth
+        }
+        // 오른쪽 묶음부터 접음 (파일은 남김)
+        for (g in topGroups.reversed()) {
+            if (measure() <= avail) break
+            if (g === topGroups.first()) break
+            collapseGroup(g)
+        }
+    }
+
+    private fun collapseGroup(g: TopGroup) {
+        if (g.chip != null) return
+        val ctx = this
+        val idx = g.outer.indexOfChild(g.icons)
+        g.outer.removeView(g.icons)
+        val chip = Ui.button(ctx, g.label + "  ▾") { showTopGroup(g) }.apply {
+            minimumHeight = Ui.dp(ctx, 40f)
+            gravity = Gravity.CENTER
+            background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            Ui.setTip(this, g.label + " 묶음 펼치기")
+        }
+        g.outer.addView(chip, idx, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(ctx, 44f)))
+        g.name.visibility = View.INVISIBLE
+        g.chip = chip
+    }
+
+    /** 접힌 묶음을 버튼 아래에 펼쳐 보여 줌. 안의 버튼을 누르면 닫힘 */
+    private fun showTopGroup(g: TopGroup) {
+        topPopup?.dismiss()
+        val ctx = this
+        (g.icons.parent as? ViewGroup)?.removeView(g.icons)
+        val box = object : FrameLayout(ctx) {
+            override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+                val r = super.dispatchTouchEvent(e)
+                if (e.actionMasked == android.view.MotionEvent.ACTION_UP) post { topPopup?.dismiss() }
+                return r
+            }
+        }.apply {
+            val p = Ui.dp(ctx, 6f)
+            setPadding(p, p, p, p)
+            background = Ui.rounded(Ui.PANEL, Ui.dp(ctx, 12f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+            addView(g.icons)
+        }
+        val pw = android.widget.PopupWindow(box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
+            elevation = Ui.dp(ctx, 8f).toFloat()
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+            setOnDismissListener { (g.icons.parent as? ViewGroup)?.removeView(g.icons); topPopup = null }
+        }
+        topPopup = pw
+        val chip = g.chip ?: return
+        // 상단 바가 화면 아래쪽이면 위로 펼침
+        val loc = IntArray(2)
+        chip.getLocationOnScreen(loc)
+        if (loc[1] > rootView.height / 2) {
+            box.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+            pw.showAsDropDown(chip, 0, -chip.height - box.measuredHeight - Ui.dp(ctx, 6f))
+        } else pw.showAsDropDown(chip, 0, Ui.dp(ctx, 6f))
+    }
     private lateinit var topToggle: ImageView
     private lateinit var toolToggle: ImageView
     private lateinit var panelToggle: ImageView
@@ -436,6 +512,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val topBodyStart = bar.childCount
         bar.addView(titleLabel)
         var group = LinearLayout(ctx)
+        topGroups.clear()
         fun group(label: String): TextView {
             val icons = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -444,11 +521,13 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
             }
             val name = Ui.text(ctx, label, 10.5f, Ui.MUTED).apply { setPadding(Ui.dp(ctx, 5f), Ui.dp(ctx, 2f), 0, 0) }
-            bar.addView(LinearLayout(ctx).apply {
+            val outer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(icons)
                 addView(name)
-            }, Ui.wrap().apply { rightMargin = Ui.dp(ctx, 8f) })
+            }
+            bar.addView(outer, Ui.wrap().apply { rightMargin = Ui.dp(ctx, 8f) })
+            topGroups.add(TopGroup(label, outer, icons, name))
             group = icons
             return name
         }
@@ -532,6 +611,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             isHorizontalScrollBarEnabled = false
             addView(bar)
         }
+        topBarRow = bar
+        // 화면에 다 들어가지 않으면 오른쪽 묶음부터 "이름 ▾" 버튼으로 접음
+        bar.post { fitTopBar() }
         // 위치는 FloatingPanels가 view.x/y로 정합니다 (기본: 가로 가운데, 위).
         root.addView(topBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
@@ -558,12 +640,29 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             listOf(Tool.FILL, Tool.GRADIENT, Tool.SHAPE, Tool.TEXT),
             listOf(Tool.EYEDROPPER, Tool.HAND),
         )
+        // 한 줄로 세웠을 때 화면 높이를 넘으면 2열 (도구를 숨기지 않고 모두 보이게)
+        val dm = resources.displayMetrics
+        val oneColDp = groups.sumOf { it.size } * 44 + (groups.size) * 12 + 42 + 42 + 24
+        val availDp = (dm.heightPixels / dm.density) - 32
+        toolTwoCol = oneColDp > availDp
         groups.forEachIndexed { gi, list ->
-            if (gi > 0) tools.addView(Ui.shortDivider(ctx, 28f))
-            for (t in list) {
-                val b = tips.bind(Ui.iconButton(ctx, toolIcon(t), t.label, 42f, ghost = true) { setTool(t) }, t.label, toolAction(t))
-                toolButtons[t] = b
-                tools.addView(b, Ui.square(ctx, 42f).apply { bottomMargin = Ui.dp(ctx, 2f) })
+            if (gi > 0) tools.addView(Ui.shortDivider(ctx, if (toolTwoCol) 72f else 28f))
+            val rowsOf = if (toolTwoCol) list.chunked(2) else list.map { listOf(it) }
+            for (rowTools in rowsOf) {
+                val row = if (toolTwoCol) LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL } else tools
+                for ((k, t) in rowTools.withIndex()) {
+                    val b = tips.bind(Ui.iconButton(ctx, toolIcon(t), t.label, 42f, ghost = true) { setTool(t) }, t.label, toolAction(t))
+                    toolButtons[t] = b
+                    row.addView(b, Ui.square(ctx, 42f).apply {
+                        bottomMargin = Ui.dp(ctx, 2f)
+                        if (toolTwoCol && k == 0) rightMargin = Ui.dp(ctx, 2f)
+                    })
+                }
+                if (toolTwoCol) {
+                    // 홀수 묶음 마지막 칸은 빈 자리로 정렬 유지
+                    if (rowTools.size == 1) row.addView(View(ctx), Ui.square(ctx, 42f))
+                    tools.addView(row)
+                }
             }
         }
         tools.addView(Ui.shortDivider(ctx, 28f))
@@ -584,8 +683,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
             isVerticalScrollBarEnabled = false
             addView(tools)
         }
-        // 기본: 왼쪽, 세로 가운데
-        root.addView(toolBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        // 기본: 왼쪽, 세로 가운데. 2열이면 폭을 정해 오른쪽 열이 잘리지 않게 (버튼 2개 + 사이 + 양쪽 여백)
+        val toolW = if (toolTwoCol) Ui.dp(ctx, 42f * 2 + 2f) + m + Ui.dp(ctx, 2f) else ViewGroup.LayoutParams.WRAP_CONTENT
+        root.addView(toolBar, FrameLayout.LayoutParams(toolW, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
         // ---- 오른쪽 패널: 카드 3장 (도구 속성 / 색 / 레이어) ----
         val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -1015,7 +1115,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
         val toolC = settings.toolBarCollapsed
         val current = toolButtons[tool]
-        toolBarBody.forEach { it.visibility = if (!toolC || it === current) View.VISIBLE else View.GONE }
+        toolBarBody.forEach { v ->
+            val holds = v === current || (v is ViewGroup && current != null && current.parent === v)
+            v.visibility = if (!toolC || holds) View.VISIBLE else View.GONE
+            // 2열 줄 안에서는 지금 도구만 남김
+            if (v is ViewGroup && v !== current) for (i in 0 until v.childCount) {
+                val c = v.getChildAt(i)
+                c.visibility = if (!toolC || c === current) View.VISIBLE else View.GONE
+            }
+        }
         toolToggle.setImageResource(if (toolC) R.drawable.ic_chevron_down else R.drawable.ic_chevron_up)
         Ui.tint(toolToggle)
 
