@@ -70,7 +70,7 @@ object Ui {
     }
 
     /** 현재 테마에 맞는 AlertDialog. */
-    fun dialog(ctx: Context): AlertDialog.Builder = AlertDialog.Builder(
+    fun dialog(ctx: Context): AlertDialog.Builder = StyledDialogBuilder(
         ctx, if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
     )
 
