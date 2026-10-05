@@ -213,14 +213,15 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         val ctx = this
         val idx = g.outer.indexOfChild(g.icons)
         g.outer.removeView(g.icons)
-        val chip = Ui.button(ctx, g.label + "  ▾") { showTopGroup(g) }.apply {
-            minimumHeight = Ui.dp(ctx, 40f)
-            gravity = Gravity.CENTER
+        // 다른 묶음과 같은 틀(테두리 상자 + 36dp 버튼 + 아래 이름표)에 펼치기 화살표 하나
+        val chip = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val p = Ui.dp(ctx, 2f)
+            setPadding(p, p, p, p)
             background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
-            Ui.setTip(this, g.label + " 묶음 펼치기")
+            addView(Ui.iconButton(ctx, R.drawable.ic_chevron_down, g.label + " 묶음 펼치기", 36f, ghost = true) { showTopGroup(g) }, Ui.square(ctx, 36f))
         }
-        g.outer.addView(chip, idx, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(ctx, 44f)))
-        g.name.visibility = View.INVISIBLE
+        g.outer.addView(chip, idx)
         g.chip = chip
     }
 
