@@ -146,6 +146,14 @@ object DialogStyle {
                 v.background = Ui.rounded(Ui.BUTTON, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
                 val p = Ui.dp(ctx, 10f)
                 v.setPadding(p, p, p, p)
+                // setView로 바로 넣은 입력칸은 카드 끝에 붙지 않게 여백
+                if ((v.parent as? View)?.id == android.R.id.custom) {
+                    (v.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                        lp.leftMargin = Ui.dp(ctx, 24f); lp.rightMargin = Ui.dp(ctx, 24f)
+                        lp.topMargin = Ui.dp(ctx, 8f); lp.bottomMargin = Ui.dp(ctx, 4f)
+                        v.layoutParams = lp
+                    }
+                }
             }
         }
         if (v is ViewGroup) for (i in 0 until v.childCount) styleTree(v.getChildAt(i))
