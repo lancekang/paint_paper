@@ -75,13 +75,7 @@ object Dialogs {
     /** 새 캔버스. 배경 선택(흰색/투명/색 지정)은 [s]에 기억합니다. */
     fun newCanvas(ctx: Context, maxSize: Int, s: AppSettings, onCreate: (Int, Int, Int?) -> Unit) {
         val pad = Ui.dp(ctx, 20f)
-        fun numberField(v: Int) = EditText(ctx).apply {
-            setText(v.toString())
-            inputType = InputType.TYPE_CLASS_NUMBER
-            maxLines = 1
-        }
-        val w = numberField(2048)
-        val h = numberField(2048)
+        val (sizeRow, w, h) = sizeFields(ctx, 2048, 2048)
         val presets = listOf(
             "정사각 2048" to (2048 to 2048),
             "FHD 1920×1080" to (1920 to 1080),
@@ -89,28 +83,40 @@ object Dialogs {
             "A4 300dpi" to (2480 to 3508),
             "4K 3840×2160" to (3840 to 2160),
         )
-        val presetRow = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        presets.chunked(3).forEach { chunk ->
-            val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            chunk.forEach { (label, size) ->
-                val b = Ui.button(ctx, label) {
-                    w.setText(size.first.toString())
-                    h.setText(size.second.toString())
-                }
-                row.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    rightMargin = Ui.dp(ctx, 6f); bottomMargin = Ui.dp(ctx, 6f)
-                })
-            }
-            presetRow.addView(row)
+        // 크기 프리셋: 드롭다운 하나 (0번 = 직접 입력). 고르면 칸을 채우고, 칸을 고치면 "직접 입력"으로
+        val presetSpinner = android.widget.Spinner(ctx).apply { isFocusable = false }
+        Ui.styleSpinner(presetSpinner, listOf("직접 입력") + presets.map { it.first })
+        var settingPreset = false
+        fun syncPreset() {
+            val ww = w.text.toString().toIntOrNull()
+            val hh = h.text.toString().toIntOrNull()
+            val i = presets.indexOfFirst { it.second.first == ww && it.second.second == hh }
+            settingPreset = true
+            presetSpinner.setSelection(i + 1, false)
+            settingPreset = false
         }
-        val sizeRow = LinearLayout(ctx).apply {
+        presetSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (settingPreset || position == 0) return
+                val size = presets[position - 1].second
+                w.setText(size.first.toString())
+                h.setText(size.second.toString())
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        val presetWatcher = object : TextWatcher {
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(e: Editable?) = syncPreset()
+        }
+        w.addTextChangedListener(presetWatcher)
+        h.addTextChangedListener(presetWatcher)
+        syncPreset()
+        val presetRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(Ui.text(ctx, "가로", 14f), Ui.wrap())
-            addView(w, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Ui.text(ctx, "  세로", 14f), Ui.wrap())
-            addView(h, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Ui.text(ctx, " px", 14f), Ui.wrap())
+            addView(Ui.text(ctx, "크기", 14f), LinearLayout.LayoutParams(Ui.dp(ctx, LABEL_W), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(presetSpinner, LinearLayout.LayoutParams(Ui.dp(ctx, 220f), Ui.dp(ctx, 38f)))
         }
         // ---- 배경 ----
         // 0 = 흰색, 1 = 투명, 2 = 색 지정
@@ -129,7 +135,7 @@ object Dialogs {
         val bgRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(Ui.text(ctx, "배경", 14f), LinearLayout.LayoutParams(Ui.dp(ctx, 44f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(Ui.text(ctx, "배경", 14f), LinearLayout.LayoutParams(Ui.dp(ctx, LABEL_W), ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         listOf("흰색", "투명", "색 지정…").forEachIndexed { i, label ->
             val b = Ui.button(ctx, label) {
@@ -155,7 +161,7 @@ object Dialogs {
         val note = Ui.text(ctx, "이 기기의 최대 크기: $maxSize px · 레이어 1장당 가로×세로×4바이트의 GPU 메모리를 씁니다.", 12f, Ui.SUBTEXT)
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
+            setPadding(pad, 0, pad, 0)
             addView(presetRow)
             addView(sizeRow)
             addView(bgRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -364,24 +370,43 @@ object Dialogs {
     }
 
     /** 숫자 입력 칸 두 개(가로·세로) 한 줄. */
+    /** 대화상자 줄 이름표 폭 (크기·배경·가로 등 줄을 가지런히) */
+    private const val LABEL_W = 52f
+
     private fun sizeFields(ctx: Context, w0: Int, h0: Int): Triple<LinearLayout, EditText, EditText> {
+        // 6자리(최대 99999px)가 들어가는 폭이면 충분
         fun field(v: Int) = EditText(ctx).apply {
             setText(v.toString())
             inputType = InputType.TYPE_CLASS_NUMBER
             maxLines = 1
+            filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+            gravity = Gravity.CENTER
             setTextColor(Ui.TEXT)
             setSelectAllOnFocus(true)
         }
         val w = field(w0)
         val h = field(h0)
+        fun fieldLp() = LinearLayout.LayoutParams(Ui.dp(ctx, 96f), ViewGroup.LayoutParams.WRAP_CONTENT)
+        fun gap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = Ui.dp(ctx, 8f); rightMargin = Ui.dp(ctx, 8f)
+        }
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(Ui.text(ctx, "가로", 14f), Ui.wrap())
-            addView(w, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Ui.text(ctx, "  세로", 14f), Ui.wrap())
-            addView(h, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Ui.text(ctx, " px", 14f), Ui.wrap())
+            addView(Ui.text(ctx, "가로", 14f), LinearLayout.LayoutParams(Ui.dp(ctx, LABEL_W), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(w, fieldLp())
+            addView(Ui.text(ctx, "×", 15f, Ui.SUBTEXT), gap())
+            addView(Ui.text(ctx, "세로", 14f), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = Ui.dp(ctx, 8f)
+            })
+            addView(h, fieldLp())
+            addView(Ui.text(ctx, "px", 14f, Ui.SUBTEXT), gap())
+            // 가로·세로 바꾸기
+            addView(Ui.button(ctx, "⇄") {
+                val a = w.text.toString()
+                w.setText(h.text.toString())
+                h.setText(a)
+            }.apply { Ui.setTip(this, "가로·세로 바꾸기") }, LinearLayout.LayoutParams(Ui.dp(ctx, 44f), Ui.dp(ctx, 38f)))
         }
         return Triple(row, w, h)
     }
