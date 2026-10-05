@@ -68,15 +68,66 @@ object DialogStyle {
         styleButton(d.getButton(DialogInterface.BUTTON_NEUTRAL), primary = false, ghost = true)
         d.listView?.let { lv ->
             lv.divider = ColorDrawable(Color.TRANSPARENT)
-            lv.dividerHeight = dp(2f)
+            lv.dividerHeight = dp(6f)
             lv.selector = ColorDrawable(Color.TRANSPARENT)
-            val pad = dp(12f)
-            lv.setPadding(pad, dp(4f), pad, dp(4f))
             lv.clipToPadding = false
             lv.adapter?.let { orig -> lv.adapter = RowAdapter(orig) }
         }
         d.window?.decorView?.let { styleTree(it) }
+        applySpacing(d)
     }
+
+    /**
+     * 간격 체계: 카드 안쪽 여백 위·아래·좌우 모두 [EDGE], 제목 → 내용 [GAP_TITLE], 내용 → 버튼 [GAP_BUTTONS],
+     * 내용 안 항목끼리 최소 [GAP_ITEM]. 기본 틀은 위만 넉넉하고 버튼 아래가 붙어 있어서 다시 맞춥니다.
+     */
+    private fun applySpacing(d: AlertDialog) {
+        val ctx = d.context
+        fun dp(v: Float) = Ui.dp(ctx, v)
+        fun id(name: String) = ctx.resources.getIdentifier(name, "id", "android")
+        fun view(name: String): View? = id(name).takeIf { it != 0 }?.let { d.findViewById<View>(it) }
+        val edge = dp(EDGE)
+        val title = view("title_template")
+        val hasTitle = view("topPanel")?.visibility == View.VISIBLE && title != null
+        title?.setPadding(edge, edge, edge, 0)
+        // 제목이 없을 때 위 여백을 대신 만드는 틈은 없앰 (아래에서 직접 맞춤)
+        view("textSpacerNoTitle")?.visibility = View.GONE
+        view("textSpacerNoButtons")?.visibility = View.GONE
+        val hasButtons = view("buttonPanel")?.visibility == View.VISIBLE
+        val top = if (hasTitle) dp(GAP_TITLE) else edge
+        d.findViewById<TextView>(android.R.id.message)?.let { m ->
+            m.setPadding(edge, top, edge, if (hasButtons) 0 else edge)
+        }
+        d.listView?.let { lv ->
+            lv.setPadding(dp(16f), top, dp(16f), if (hasButtons) 0 else dp(16f))
+        }
+        // setView 내용: 좌우는 내용이 가진 여백 + 4dp ≈ 24dp, 위는 제목 아래 간격
+        view("customPanel")?.setPadding(dp(4f), if (hasTitle) dp(GAP_TITLE - 8f) else dp(8f), dp(4f), 0)
+        d.findViewById<ViewGroup>(android.R.id.custom)?.getChildAt(0)?.let { root ->
+            if (root is android.widget.LinearLayout && root.orientation == android.widget.LinearLayout.VERTICAL) {
+                for (i in 1 until root.childCount) {
+                    val c = root.getChildAt(i)
+                    (c.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                        if (lp.topMargin < dp(GAP_ITEM)) {
+                            lp.topMargin = dp(GAP_ITEM)
+                            c.layoutParams = lp
+                        }
+                    }
+                }
+            }
+        }
+        // 버튼 줄: 위 [GAP_BUTTONS], 아래·좌우 카드 여백과 같게
+        view("buttonPanel")?.let { bp ->
+            bp.setPadding(0, 0, 0, 0)
+            val bar = (bp as? ViewGroup)?.getChildAt(0) ?: bp
+            bar.setPadding(edge - dp(6f), dp(GAP_BUTTONS), edge - dp(6f), edge)
+        }
+    }
+
+    private const val EDGE = 24f
+    private const val GAP_TITLE = 14f
+    private const val GAP_BUTTONS = 20f
+    private const val GAP_ITEM = 12f
 
     private fun styleButton(b: Button?, primary: Boolean, ghost: Boolean = false) {
         b ?: return
