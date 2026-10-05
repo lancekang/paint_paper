@@ -103,7 +103,7 @@ object FloodFill {
             val x = seeds[i]; val y = seeds[i + 1]
             i += 2
             if (x !in 0 until w || y !in 0 until h) continue
-            if (nearInk(px, w, h, x, y)) continue
+            if (nearInk(px, w, h, x, y) || nearEdge(px, w, h, x, y)) continue
             val k = y * w + x
             groups.getOrPut(px.getInt(k * 4)) { ArrayList() }.add(k)
         }
@@ -139,8 +139,19 @@ object FloodFill {
                 if (runs >= MAX_PAINT_RUNS) break
                 val fillable = if (thick != null && thick[k].toInt() == 1) thick else match
                 val reg = scanlineFill(fillable, w, h, k % w, k / w)
-                for (p in 0 until n) if (reg[p].toInt() != 0) union[p] = 1
                 runs++
+                // 가는 띠(선 자체)면 칠하지 않음: 넓이 / 테두리 픽셀 수 = 대략 폭의 절반
+                var area = 0
+                var edge = 0
+                for (p in 0 until n) {
+                    if (reg[p].toInt() == 0) continue
+                    area++
+                    val x = p % w
+                    if (x == 0 || x == w - 1 || p < w || p >= n - w ||
+                        reg[p - 1].toInt() == 0 || reg[p + 1].toInt() == 0 || reg[p - w].toInt() == 0 || reg[p + w].toInt() == 0) edge++
+                }
+                if (area < edge * MIN_HALF_WIDTH) continue
+                for (p in 0 until n) if (reg[p].toInt() != 0) union[p] = 1
                 any = true
             }
             if (!any) continue
@@ -174,6 +185,23 @@ object FloodFill {
         if (maxX < 0) return null
         return Result(acc, IRect(minX, minY, maxX - minX + 1, maxY - minY + 1))
     }
+
+    /** 씨앗 둘레 3px 안에 색이 크게 다른 픽셀이 있으면 true (선 위·선 가장자리, 선 색이 연해도) */
+    private fun nearEdge(px: ByteBuffer, w: Int, h: Int, x: Int, y: Int): Boolean {
+        val o0 = (y * w + x) * 4
+        for (dy in -3..3) for (dx in -3..3) {
+            val xx = x + dx; val yy = y + dy
+            if (xx !in 0 until w || yy !in 0 until h) continue
+            val o = (yy * w + xx) * 4
+            for (c in 0 until 4) {
+                if (abs((px.get(o + c).toInt() and 0xFF) - (px.get(o0 + c).toInt() and 0xFF)) > 40) return true
+            }
+        }
+        return false
+    }
+
+    /** 덧칠: 이보다 가는 영역(넓이 < 테두리 × 이 값)은 선으로 보고 칠하지 않음 (≈ 폭 8px) */
+    private const val MIN_HALF_WIDTH = 4
 
     /** 씨앗이 선 위이거나 선 가장자리(2px 안)에 있으면 true (가장자리 회색에서 시작하면 선을 따라 번지므로) */
     private fun nearInk(px: ByteBuffer, w: Int, h: Int, x: Int, y: Int): Boolean {
