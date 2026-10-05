@@ -424,7 +424,7 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val size = Ui.dp(ctx, 20f)
         for (c in host.settings.recentColors) {
             recentRow.addView(View(ctx).apply {
-                background = Ui.rounded(c, Ui.dp(ctx, 4f).toFloat(), 1, 0x55FFFFFF)
+                background = Ui.rounded(c, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL)
                 setOnClickListener { host.onRecentColor(c) }
             }, LinearLayout.LayoutParams(size, size).apply { rightMargin = Ui.dp(ctx, 3f) })
         }

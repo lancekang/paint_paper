@@ -43,8 +43,12 @@ object Ui {
     var BUTTON_ON = 0; private set
     /** 강조색 위 글자·아이콘 */
     var ON_ACCENT = 0; private set
+    /** 장식용 구분선 (명도 대비 기준 대상 아님) */
     var DIVIDER = 0; private set
+    /** 패널·카드 같은 틀의 테두리 (장식용) */
     var BORDER = 0; private set
+    /** 버튼·입력칸·드롭다운처럼 누르는 컨트롤의 테두리. 카드·막대·버튼 바탕과 3:1 이상 (WCAG 1.4.11) */
+    var CONTROL = 0; private set
     /** 선택된 목록 행 */
     var ROW_ON = 0; private set
     /** GL이 캔버스 밖을 칠하는 색 */
@@ -58,14 +62,17 @@ object Ui {
         this.dark = dark
         if (dark) {
             BG = 0xFF1B1C1E.toInt(); PANEL = 0xF2202124.toInt(); CARD = 0xFF292B2F.toInt(); CARD_HEAD = 0xFF2F3136.toInt()
-            TEXT = 0xFFE9E9EB.toInt(); SUBTEXT = 0xFFA3A5AA.toInt(); MUTED = 0xFF75777D.toInt()
-            BUTTON = 0xFF35373C.toInt(); BUTTON_ON = 0xFF2F6BD8.toInt(); ON_ACCENT = 0xFFFFFFFF.toInt()
-            DIVIDER = 0xFF393B40.toInt(); BORDER = 0xFF3E4046.toInt(); ROW_ON = 0xFF263A5E.toInt(); CANVAS_BG = 0xFF303236.toInt()
+            // 명도 대비: 글자 4.5:1, 컨트롤·선택 표시 3:1 이상 (python tools/check_contrast.py)
+            TEXT = 0xFFE9E9EB.toInt(); SUBTEXT = 0xFFA3A5AA.toInt(); MUTED = 0xFF94969A.toInt()
+            BUTTON = 0xFF2B2D30.toInt(); BUTTON_ON = 0xFF3372DD.toInt(); ON_ACCENT = 0xFFFFFFFF.toInt()
+            DIVIDER = 0xFF393B40.toInt(); BORDER = 0xFF3E4046.toInt(); CONTROL = 0xFF7A7C80.toInt()
+            ROW_ON = 0xFF263A5E.toInt(); CANVAS_BG = 0xFF303236.toInt()
         } else {
             BG = 0xFFE3E4E7.toInt(); PANEL = 0xF2F4F5F7.toInt(); CARD = 0xFFFFFFFF.toInt(); CARD_HEAD = 0xFFF3F4F6.toInt()
-            TEXT = 0xFF1E1F22.toInt(); SUBTEXT = 0xFF5C5F66.toInt(); MUTED = 0xFF8E9198.toInt()
+            TEXT = 0xFF1E1F22.toInt(); SUBTEXT = 0xFF55585E.toInt(); MUTED = 0xFF65686C.toInt()
             BUTTON = 0xFFE9EAED.toInt(); BUTTON_ON = 0xFF2F6BD8.toInt(); ON_ACCENT = 0xFFFFFFFF.toInt()
-            DIVIDER = 0xFFDCDEE2.toInt(); BORDER = 0xFFD2D4D9.toInt(); ROW_ON = 0xFFDCE7FB.toInt(); CANVAS_BG = 0xFFC8CACE.toInt()
+            DIVIDER = 0xFFDCDEE2.toInt(); BORDER = 0xFFD2D4D9.toInt(); CONTROL = 0xFF7D8084.toInt()
+            ROW_ON = 0xFFDCE7FB.toInt(); CANVAS_BG = 0xFFC8CACE.toInt()
         }
     }
 
@@ -101,7 +108,7 @@ object Ui {
             val p = dp(ctx, 10f)
             setPadding(p, dp(ctx, 6f), p, dp(ctx, 6f))
             minWidth = dp(ctx, minWidthDp)
-            background = rounded(BUTTON, dp(ctx, 6f).toFloat())
+            background = rounded(BUTTON, dp(ctx, 6f).toFloat(), dp(ctx, 1f), CONTROL)
             isFocusable = false
             isClickable = true
             setOnClickListener { onClick() }
@@ -146,7 +153,7 @@ object Ui {
         v.background = when {
             on -> rounded(BUTTON_ON, r)
             v.tag === GHOST -> rounded(Color.TRANSPARENT, r)
-            else -> rounded(BUTTON, r)
+            else -> rounded(BUTTON, r, dp(v.context, 1f), CONTROL)
         }
         when (v) {
             is ImageView -> tint(v, if (on) ON_ACCENT else TEXT)
@@ -210,7 +217,7 @@ object Ui {
                 }
         }.apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
         spinner.setPopupBackgroundDrawable(rounded(CARD, dp(ctx, 8f).toFloat(), dp(ctx, 1f), BORDER))
-        spinner.background = rounded(BUTTON, dp(ctx, 6f).toFloat())
+        spinner.background = rounded(BUTTON, dp(ctx, 6f).toFloat(), dp(ctx, 1f), CONTROL)
     }
 
     /**

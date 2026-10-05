@@ -1200,8 +1200,9 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         if (::colorSliders.isInitialized && colorSliders.color != (settings.primaryColor or 0xFF000000.toInt())) colorSliders.color = settings.primaryColor
         val r = Ui.dp(this, 6f).toFloat()
         val stroke = Ui.dp(this, 2f)
-        primarySwatch.background = Ui.rounded(settings.primaryColor, r, stroke, Color.WHITE)
-        secondarySwatch.background = Ui.rounded(settings.secondaryColor, r, stroke, Color.GRAY)
+        // 견본 테두리: 막대 바탕과 3:1 이상 (흰색·검은색 견본도 경계가 보이게). 주색은 본문색 고리로 앞에 있음을 표시
+        primarySwatch.background = Ui.rounded(settings.primaryColor, r, stroke, Ui.TEXT)
+        secondarySwatch.background = Ui.rounded(settings.secondaryColor, r, stroke, Ui.CONTROL)
     }
 
     private fun updateTitle() {

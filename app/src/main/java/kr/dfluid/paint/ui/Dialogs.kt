@@ -130,7 +130,7 @@ object Dialogs {
         val bgButtons = ArrayList<View>()
         fun refreshBg() {
             bgButtons.forEachIndexed { i, b -> Ui.setOn(b, i == bgChoice) }
-            swatch.background = Ui.rounded(customColor, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Color.GRAY)
+            swatch.background = Ui.rounded(customColor, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL)
         }
         val bgRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -561,7 +561,7 @@ object Dialogs {
         }
         val swatch = View(ctx)
         fun refreshSwatch() {
-            swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Color.GRAY)
+            swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL)
         }
         refreshSwatch()
         val colorRow = LinearLayout(ctx).apply {

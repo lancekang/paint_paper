@@ -153,7 +153,7 @@ object DialogStyle {
             }
             else -> {
                 b.setTextColor(Ui.TEXT)
-                b.background = pressable(Ui.BUTTON, darker(Ui.BUTTON), r)
+                b.background = pressable(Ui.BUTTON, darker(Ui.BUTTON), r, Ui.CONTROL)
             }
         }
         (b.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
@@ -163,9 +163,10 @@ object DialogStyle {
         }
     }
 
-    private fun pressable(normal: Int, pressed: Int, r: Float) = StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_pressed), Ui.rounded(pressed, r))
-        addState(intArrayOf(), Ui.rounded(normal, r))
+    private fun pressable(normal: Int, pressed: Int, r: Float, stroke: Int = 0) = StateListDrawable().apply {
+        val w = if (stroke != 0) 2 else 0
+        addState(intArrayOf(android.R.attr.state_pressed), Ui.rounded(pressed, r, w, stroke))
+        addState(intArrayOf(), Ui.rounded(normal, r, w, stroke))
     }
 
     private fun darker(c: Int): Int {
@@ -194,7 +195,7 @@ object DialogStyle {
                 val ctx = v.context
                 v.setTextColor(Ui.TEXT)
                 v.setHintTextColor(Ui.MUTED)
-                v.background = Ui.rounded(Ui.BUTTON, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.BORDER)
+                v.background = Ui.rounded(Ui.BUTTON, Ui.dp(ctx, 8f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL)
                 val p = Ui.dp(ctx, 10f)
                 v.setPadding(p, p, p, p)
                 // setView로 바로 넣은 입력칸은 카드 끝에 붙지 않게 여백

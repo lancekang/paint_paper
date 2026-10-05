@@ -105,6 +105,10 @@ class SwatchGridView(context: Context, private val colors: MutableList<Int>, pri
     var onPick: ((Int) -> Unit)? = null
     var onChanged: (() -> Unit)? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = Ui.dp(context, 1f).toFloat()
+    }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         textSize = Ui.dp(context, 18f).toFloat()
@@ -168,6 +172,9 @@ class SwatchGridView(context: Context, private val colors: MutableList<Int>, pri
                 paint.color = colors[k - 1]
                 canvas.drawRoundRect(cell, 6f, 6f, paint)
             }
+            // 견본 경계: 바탕과 3:1 이상 (흰색·검은색 견본도 보이게)
+            edge.color = Ui.CONTROL
+            canvas.drawRoundRect(cell, 6f, 6f, edge)
         }
     }
 

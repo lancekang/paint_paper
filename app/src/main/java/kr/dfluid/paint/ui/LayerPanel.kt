@@ -239,7 +239,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             preview(false)
         }
         val swatch = View(ctx)
-        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), android.graphics.Color.GRAY) }
+        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL) }
         refresh()
         val colorRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -427,7 +427,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
         angleRow.set(angle.roundToInt().coerceIn(0, 90), "${angle.roundToInt()}°")
         angleRow.onChange = { p -> angle = p.toFloat(); angleRow.set(p, "$p°"); apply(false) }
         val swatch = View(ctx)
-        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), android.graphics.Color.GRAY) }
+        fun refresh() { swatch.background = Ui.rounded(color, Ui.dp(ctx, 4f).toFloat(), Ui.dp(ctx, 1f), Ui.CONTROL) }
         refresh()
         val colorRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -528,7 +528,8 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             background = if (multi && info.id in picked) {
                 Ui.rounded(Ui.ROW_ON, Ui.dp(ctx, 6f).toFloat(), Ui.dp(ctx, 2f), Ui.BUTTON_ON)
             } else {
-                Ui.rounded(if (info.id == activeId) Ui.ROW_ON else 0x00000000, Ui.dp(ctx, 6f).toFloat())
+                if (info.id == activeId) Ui.rounded(Ui.ROW_ON, Ui.dp(ctx, 6f).toFloat(), Ui.dp(ctx, 1.5f), Ui.BUTTON_ON)
+                else Ui.rounded(0x00000000, Ui.dp(ctx, 6f).toFloat())
             }
             isClickable = true
             setOnClickListener {
@@ -586,7 +587,7 @@ class LayerPanel(private val ctx: Context, private val renderer: CanvasRenderer,
             setOnClickListener { renderer.setProps(info.id, p.copy(visible = !p.visible), record = true) }
         }, Ui.square(ctx, 30f).apply { rightMargin = Ui.dp(ctx, 4f) })
         if (p.clip && !info.orphanClip) {
-            row.addView(Ui.text(ctx, "↳", 14f, 0xFFE0A030.toInt()).apply { setPadding(0, 0, Ui.dp(ctx, 4f), 0) })
+            row.addView(Ui.text(ctx, "↳", 14f, if (Ui.dark) 0xFFE0A030.toInt() else 0xFFA86A00.toInt()).apply { setPadding(0, 0, Ui.dp(ctx, 4f), 0) })
         }
         if (folder) {
             row.addView(ImageView(ctx).apply {

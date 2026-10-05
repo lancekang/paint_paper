@@ -73,6 +73,8 @@
 
 ## 코드 규칙
 
+- **명도 대비 (WCAG 2.2)**: 글자 4.5:1, 아이콘·컨트롤 경계·선택 표시 3:1 이상. 색 토큰을 바꾸면 `python tools/check_contrast.py`. 누르는 컨트롤(버튼·입력칸·드롭다운·색 견본) 테두리는 `Ui.CONTROL`, 패널·카드 틀은 `Ui.BORDER`(장식). 선택한 행은 ROW_ON 바탕만으로는 약하니 강조색 테두리를 함께.
+
 - UI 문자열과 주석은 한국어. 사용자 메시지는 존댓말(~합니다/~세요).
 - AndroidX를 추가하지 않습니다. UI는 코드로 만든 프레임워크 위젯(`ui/Ui.kt` 도우미).
 - **색은 하드코딩하지 말고 `Ui.TEXT/CARD/BUTTON_ON…`** (라이트/다크 테마, `Ui.applyTheme`). 대화상자는 `Ui.dialog(ctx)`(`ui/DialogStyle.kt`의 StyledDialogBuilder가 만들 때 앱 카드 모양으로 꾸밈: 둥근 카드·제목 강조 막대·채운 확인 버튼·둥근 목록 행·안의 위젯 강조색. 시스템 AlertDialog.Builder를 직접 쓰지 말 것), 아이콘은 `Ui.iconButton`(ghost = 묶음 안), 드롭다운은 `Ui.styleSpinner`, 슬라이더는 `Ui.styleSeek`.
