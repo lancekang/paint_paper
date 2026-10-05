@@ -2132,7 +2132,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
                 preview()
             }
             body.addView(Ui.text(ctx, "가로 = 원래 밝기, 세로 = 바뀐 밝기. 빈 곳을 누르면 점 추가, 점을 두 번 누르면 삭제", 11.5f, Ui.MUTED))
-            body.addView(cv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            body.addView(cv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 200f)).apply {
                 topMargin = Ui.dp(ctx, 4f)
             })
         } else null

@@ -37,7 +37,9 @@ class PressureCurveView(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, (w * 0.75f).toInt())
+        // 높이를 정해 주면 그대로 (톤 커브 대화상자가 캔버스를 가리지 않게)
+        val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightMeasureSpec) else (w * 0.75f).toInt()
+        setMeasuredDimension(w, h)
     }
 
     private fun sx(x: Float) = pad + x * (width - 2 * pad)
