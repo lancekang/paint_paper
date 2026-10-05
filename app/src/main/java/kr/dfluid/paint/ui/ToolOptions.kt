@@ -296,19 +296,22 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
 
     private fun buildShape() {
         val s = host.settings
-        view.addView(toggleRow(listOf("직선", "사각", "타원", "올가미", "말풍선", "다각", "별"), s.shapeKind) {
-            val had = s.shapeKind >= 5
+        // 두 줄로 (고르면 다시 만들어 양쪽 줄의 강조를 맞춤)
+        view.addView(toggleRow(listOf("직선", "사각형", "타원", "올가미"), if (s.shapeKind < 4) s.shapeKind else -1) {
             s.shapeKind = it; s.save()
-            // 꼭짓점 수 슬라이더를 보이거나 숨김
-            if (had != (it >= 5)) view.post { rebuild() }
+            view.post { rebuild() }
         }, lp(2f))
-        if (s.shapeKind >= 5) {
+        view.addView(toggleRow(listOf("말풍선", "다각형", "별", "꺾은선"), if (s.shapeKind >= 4) s.shapeKind - 4 else -1) {
+            s.shapeKind = it + 4; s.save()
+            view.post { rebuild() }
+        }, lp(4f))
+        if (s.shapeKind == 5 || s.shapeKind == 6) {
             intSlider("꼭짓점", 3, 16, { s.shapeSides }, { s.shapeSides = it }) { "$it" }
         }
         view.addView(toggleRow(listOf("선", "채우기", "선+채우기"), s.shapeFill) {
             s.shapeFill = it; s.save()
         }, lp(4f))
-        view.addView(hint("드래그해 그립니다. 다각형·별은 끈 상자 안에 꼭짓점이 위로 오게. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미는 그린 모양 그대로 칠합니다. 말풍선은 안쪽 = 보조색, 테두리 = 주색."), lp())
+        view.addView(hint("꺾은선: 펜으로 점을 차례로 찍고, 첫 점을 누르면 닫힌 도형 · 마지막 점을 두 번 누르면 열린 선으로 끝 (Shift = 45°). 그 밖에는 드래그해 그립니다. 다각형·별은 끈 상자 안에 꼭짓점이 위로 오게. Shift = 정사각형·정원·45°, Alt = 누른 곳이 중심. 채우기는 주색, 올가미는 그린 모양 그대로 칠합니다. 말풍선은 안쪽 = 보조색, 테두리 = 주색."), lp())
     }
 
     // ---- 선택 ----

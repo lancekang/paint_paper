@@ -95,6 +95,12 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     /** fillLasso 중 덧칠 (닫힌 올가미가 아니라 지나간 길) */
     private var fillOver = false
     private val lassoPts = ArrayList<Float>()
+    /** 꺾은선(도형 7): 찍은 점들. 진행 중이면 polyActive, 끝낼 때 polyFinal/polyClose로 마지막 윤곽을 만듦 */
+    private val polyPts = ArrayList<Float>()
+    private var polyActive = false
+    private var polyFinal = false
+    private var polyClose = false
+    private var polyUpTime = 0L
     /** 마지막 도형 계산 결과 (말풍선은 펜을 뗄 때 채우기·선을 따로 확정) */
     private var lastLine = FloatArray(0)
     private var lastFill: FloatArray? = null
@@ -292,7 +298,12 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             MotionEvent.ACTION_CANCEL -> {
                 when (mode) {
                     Mode.DRAW -> { lineMode = false; lineBrush = null; renderer.cancelStroke() }
-                    Mode.SHAPE -> { shapeBrush = null; renderer.cancelStroke() }
+                    Mode.SHAPE -> {
+                        shapeBrush = null
+                        polyActive = false
+                        polyPts.clear()
+                        renderer.cancelStroke()
+                    }
                     Mode.GRADIENT -> h.onGradient(0f, 0f, 0f, 0f, 2)
                     Mode.SELECT -> h.onSelectPreview(selShape, FloatArray(0))
                     Mode.MOVE -> h.onMoveEnd()
@@ -382,6 +393,7 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         val tool = h.currentTool
         viewport.toCanvas(x, y, tmp)
         downCx = tmp[0]; downCy = tmp[1]
+        if (polyActive && !(tool == Tool.SHAPE && h.shapeKind == 7)) finishPoly(h, close = false)
         mode = when {
             h.holdMode == HoldMode.PAN || tool == Tool.HAND -> Mode.DRAG_PAN
             h.holdMode == HoldMode.ROTATE -> Mode.DRAG_ROTATE
@@ -434,11 +446,34 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 h.onSelectPreview(selShape, selPts.toFloatArray())
             }
             Mode.MOVE -> h.onMoveStart()
-            Mode.SHAPE -> {
+            Mode.SHAPE -> if (h.shapeKind == 7 && polyActive) {
+                // 꺾은선 이어 찍기: 첫 점을 누르면 닫고, 마지막 점을 빨리 두 번 누르면 끝
+                val p = FloatArray(2)
+                viewport.toScreen(polyPts[0], polyPts[1], p)
+                val nearFirst = polyPts.size >= 6 && hypot(p[0] - x, p[1] - y) < POLY_CLOSE_DP * density
+                viewport.toScreen(polyPts[polyPts.size - 2], polyPts[polyPts.size - 1], p)
+                val nearLast = hypot(p[0] - x, p[1] - y) < POLY_CLOSE_DP * density
+                if (nearFirst) {
+                    finishPoly(h, close = true); mode = Mode.IGNORE
+                } else if (nearLast && e.eventTime - polyUpTime < 400) {
+                    finishPoly(h, close = false); mode = Mode.IGNORE
+                } else {
+                    // 미리보기 획을 새로 시작해 전체를 다시 그림 (다른 작업이 획을 확정했어도 이어지게)
+                    val brush = shapeBrush ?: h.brushFor(Tool.SHAPE).deepCopy().also { shapeBrush = it }
+                    renderer.cancelStroke()
+                    renderer.beginStroke(brush, h.brushColor, h.tipFor(brush))
+                    updateShape(downCx, downCy, e.metaState, h)
+                }
+            } else {
                 val brush = h.brushFor(Tool.SHAPE).deepCopy()
                 shapeBrush = brush
                 lassoPts.clear()
                 lassoPts.add(downCx); lassoPts.add(downCy)
+                if (h.shapeKind == 7) {
+                    polyActive = true
+                    polyPts.clear()
+                    polyPts.add(downCx); polyPts.add(downCy)
+                }
                 renderer.beginStroke(brush, h.brushColor, h.tipFor(brush))
                 h.onStrokeStarted()
             }
@@ -546,6 +581,16 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 outline = floatArrayOf(downCx, downCy, x1, y1)
                 closed = false
             }
+            7 -> {
+                val pts = ArrayList<Float>(polyPts)
+                if (!polyFinal) {
+                    val c = floatArrayOf(x1, y1)
+                    snapPoly(c, meta)
+                    pts.add(c[0]); pts.add(c[1])
+                }
+                outline = pts.toFloatArray()
+                closed = polyFinal && polyClose
+            }
             3 -> {
                 val n = lassoPts.size
                 if (hypot(cx - lassoPts[n - 2], cy - lassoPts[n - 1]) * viewport.scale > 2f) {
@@ -577,8 +622,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
             }
         }
         val fillMode = h.shapeFill
-        val wantFill = kind == 3 || (kind != 0 && fillMode >= 1)
-        val wantLine = kind == 0 || (kind != 3 && fillMode != 1)
+        val wantFill = kind == 3 || (kind != 0 && kind != 7 && fillMode >= 1) || (kind == 7 && closed && fillMode >= 1)
+        val wantLine = kind == 0 || (kind == 7 && (!closed || fillMode != 1)) || (kind != 3 && kind != 7 && fillMode != 1)
         var stamps = FloatArray(0)
         if (wantLine && outline.size >= 4) {
             builder.begin(brush, 0f, outline[0], outline[1], 1f, 0f, 0f)
@@ -607,6 +652,34 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         lastFill = if (wantFill && outline.size >= 6) outline else null
         // 말풍선은 미리보기에서 채우기를 빼고 선만 (채우기 색이 다르므로 확정 때 따로)
         renderer.setStrokeLine(combined, if (kind == 4) null else lastFill)
+    }
+
+    /** Shift면 직전 점에서 45° 단위로 */
+    private fun snapPoly(p: FloatArray, meta: Int) {
+        if ((meta and KeyEvent.META_SHIFT_ON) == 0 || polyPts.size < 2) return
+        val ax = polyPts[polyPts.size - 2]; val ay = polyPts[polyPts.size - 1]
+        val len = hypot(p[0] - ax, p[1] - ay)
+        val a = (Math.round(atan2(p[1] - ay, p[0] - ax) / (PI / 4)) * (PI / 4)).toFloat()
+        p[0] = ax + len * kotlin.math.cos(a)
+        p[1] = ay + len * kotlin.math.sin(a)
+    }
+
+    /** 꺾은선 끝내기: 점이 둘 이상이면 확정 ([close] = 첫 점으로 닫기), 아니면 취소 */
+    private fun finishPoly(h: Host, close: Boolean) {
+        if (!polyActive) return
+        if (polyPts.size >= 4 && shapeBrush != null) {
+            polyFinal = true
+            polyClose = close && polyPts.size >= 6
+            updateShape(polyPts[polyPts.size - 2], polyPts[polyPts.size - 1], 0, h)
+            renderer.endStroke()
+        } else {
+            renderer.cancelStroke()
+        }
+        polyActive = false
+        polyFinal = false
+        polyClose = false
+        polyPts.clear()
+        shapeBrush = null
     }
 
     /** 정다각형 / 별 (안쪽 꼭짓점 = 바깥의 45%). 첫 꼭짓점이 위, 상자에 맞춰 늘림 */
@@ -812,7 +885,18 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
                 h.onGradient(downCx, downCy, tmp[0], tmp[1], if (tiny) 2 else 1)
             }
             Mode.MOVE -> h.onMoveEnd()
-            Mode.SHAPE -> {
+            Mode.SHAPE -> if (polyActive && h.shapeKind == 7) {
+                // 꺾은선: 뗀 곳을 점으로 (첫 탭은 시작점만), 획은 확정하지 않고 다음 점을 기다림
+                viewport.toCanvas(e.getX(i), e.getY(i), tmp)
+                val n = polyPts.size
+                val moved = hypot(tmp[0] - polyPts[n - 2], tmp[1] - polyPts[n - 1]) * viewport.scale >= 4f
+                if (moved) {
+                    snapPoly(tmp, e.metaState)
+                    polyPts.add(tmp[0]); polyPts.add(tmp[1])
+                }
+                updateShape(tmp[0], tmp[1], e.metaState, h)
+                polyUpTime = e.eventTime
+            } else {
                 viewport.toCanvas(e.getX(i), e.getY(i), tmp)
                 val tiny = hypot(tmp[0] - downCx, tmp[1] - downCy) * viewport.scale < 4f
                 if (tiny) renderer.cancelStroke()
@@ -919,6 +1003,11 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
         when (e.actionMasked) {
             MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
                 val tool = if (e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER) Tool.ERASER else h.currentTool
+                if (polyActive && mode == Mode.NONE && shapeBrush != null) {
+                    // 꺾은선: 다음 점까지 고무줄 미리보기
+                    viewport.toCanvas(e.x, e.y, tmp)
+                    updateShape(tmp[0], tmp[1], e.metaState, h)
+                }
                 if (tool.isBrush && h.holdMode == HoldMode.NONE) {
                     val r = h.brushFor(tool).size / 2f * viewport.scale
                     renderer.setCursor(e.x, e.y, r)
@@ -957,6 +1046,8 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     companion object {
         /** 자 방향을 정하기 위해 움직여야 하는 거리 (화면 dp) */
         const val RULER_DECIDE_DP = 10f
+        /** 꺾은선 첫 점/마지막 점을 눌렀다고 보는 거리 */
+        private const val POLY_CLOSE_DP = 18f
         /** rulerHandle 값: 대칭 중심 */
         private const val SYM_HANDLE = 1000
         private const val TAP_MS = 280L

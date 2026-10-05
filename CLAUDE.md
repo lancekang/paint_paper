@@ -45,6 +45,7 @@
     - 덧칠 (`FloodFill.paintOver`): 4px 간격 씨앗마다 run, 진한 선 위 씨앗은 건너뜀.
     - 효과선 (`engine/EffectLines.kt`): 집중선·유선을 VStroke 목록으로 → 새 벡터 레이어(rasterStrokes).
     - 도형 다각형·별 (shapeKind 5·6, shapeSides).
+    - 꺾은선 (shapeKind 7, `CanvasView.polyPts/polyActive/finishPoly`): 탭마다 미리보기 획을 다시 시작해 전체를 setStrokeLine, 끝낼 때 endStroke. 호버로 고무줄.
     - 타임랩스 (`processTimelapse` → `onTimelapseFrame` → cacheDir/timelapse/*.jpg → `writeTimelapse` MP4).
     - 필압 자동 조정 (`ui/PressurePad.kt`): 가운데값 → 0.5가 되는 감마.
     - 벡터 지우개 교점까지 (`document/Vector.kt` VectorCut: 다른 선의 선분을 32px 격자에 넣고 교점을 찾아 닿은 곳 앞뒤 교점 사이를 잘라 조각 0~2개로). `CanvasRenderer.vectorEraseCut`.
@@ -108,4 +109,4 @@ ui/        MainActivity, OverlayView, LayerPanel, ToolOptions, BrushEditor, Pres
    - 반영한 것: 비표준 모드 타일은 내용 영역만, 활성 쪽 속성 변경 시 아래 캐시 유지, FBO 바인딩 캐시(GlState.bindFbo), framebuffer fetch 합성.
    - 다음 후보: 타일 그리기 호출 묶기(인스턴싱/텍스처 배열), 위쪽 캐시. 레이어 효과(경계·톤·질감·수채·컬러)는 레이어마다 캔버스 크기 패스라 많이 쓰면 느려짐 → 효과 결과 캐시 후보.
 3. PSD를 클립 스튜디오/포토샵에서 열어 확인 (레이어 효과·텍스트·벡터는 PSD에서 일반 픽셀/빠짐).
-4. 남은 클립 스튜디오 기능 후보: 다중 선택 레이어 함께 옮기기, 벡터 선 제어점 편집, 꺾은선·곡선 도형, 원근 격자, 색조 보정 레이어 마스크·PSD 조정 레이어, 3D 데생 인형(제외), 도킹 패널, 타일 합성 성능.
+4. 남은 클립 스튜디오 기능 후보: 다중 선택 레이어 함께 옮기기, 벡터 선 제어점 편집, 곡선 도형, 원근 격자, 색조 보정 레이어 마스크·PSD 조정 레이어, 3D 데생 인형(제외), 도킹 패널, 타일 합성 성능.
