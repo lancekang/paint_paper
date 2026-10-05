@@ -170,9 +170,21 @@ class CanvasView(context: Context, private val renderer: CanvasRenderer) : GLSur
     private var mode = Mode.NONE
     private var primaryId = -1
     private var primaryIsPen = false
-    /** 스타일러스를 한 번이라도 썼는지 (팜 리젝션 기준). */
-    var stylusSeen = false
+    /**
+     * 스타일러스가 있는지 (팜 리젝션 기준). 기기에 스타일러스 입력 장치가 있으면 처음부터 true,
+     * 없으면 펜을 처음 쓸 때 true. ("손가락으로 그리기"를 꺼도 펜이 없는 기기에서는 손가락으로 그릴 수 있게)
+     */
+    var stylusSeen = hasStylusDevice()
         private set
+
+    private fun hasStylusDevice(): Boolean = try {
+        android.view.InputDevice.getDeviceIds().any { id ->
+            val dev = android.view.InputDevice.getDevice(id)
+            dev != null && (dev.sources and android.view.InputDevice.SOURCE_STYLUS) == android.view.InputDevice.SOURCE_STYLUS
+        }
+    } catch (e: Exception) {
+        false
+    }
     private val builder = StrokeBuilder()
     // 선 입·출 처리
     private val taper = StrokeTaper()
