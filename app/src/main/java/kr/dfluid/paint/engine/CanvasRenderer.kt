@@ -31,6 +31,7 @@ import kr.dfluid.paint.document.ShapeEntry
 import kr.dfluid.paint.document.StructureCommand
 import kr.dfluid.paint.document.TextSpec
 import kr.dfluid.paint.document.TilesCommand
+import kr.dfluid.paint.document.VectorCut
 import kr.dfluid.paint.document.VStroke
 import kr.dfluid.paint.document.VectorCommand
 import kr.dfluid.paint.document.TreeShape
@@ -2281,6 +2282,8 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
     /** 합성 결과에서 색을 집습니다. 투명한 곳이면 콜백을 부르지 않습니다. */
     /** 스포이드: true면 합성 결과 대신 현재 레이어에서 */
     @Volatile var pickFromLayer = false
+    /** 벡터 지우개: true면 교점까지만 지움 (false = 닿은 선 전체) */
+    @Volatile var vectorEraseCut = false
 
     fun pickColor(x: Int, y: Int, callback: (Int) -> Unit) = post {
         pendingPicks.add(intArrayOf(x, y) to callback)
@@ -3390,6 +3393,21 @@ class CanvasRenderer(private val listener: Listener) : GLSurfaceView.Renderer, L
         val keep = ArrayList<VStroke>(cur.size)
         var area: IRect? = null
         for (v in cur) {
+            if (vectorEraseCut && v.fill == null) {
+                // 교점까지: 닿은 곳 앞뒤로 다른 선과 만나는 곳 사이만 잘라 냄
+                var k = -1
+                var i = 0
+                while (i + 2 < stamps.size && k < 0) {
+                    k = v.hitIndex(stamps[i], stamps[i + 1], stamps[i + 2])
+                    i += StrokeBuilder.FLOATS
+                }
+                if (k < 0) { keep.add(v); continue }
+                val res = VectorCut.cut(v, k, cur)
+                keep.addAll(res.pieces)
+                val b = res.removed
+                IRect.ofBounds(b[0], b[1], b[2], b[3], d.width, d.height)?.let { area = it.union(area) }
+                continue
+            }
             var hit = false
             var i = 0
             while (i + 2 < stamps.size) {

@@ -57,6 +57,8 @@ class AppSettings(context: Context) {
     var subOpen = false
     /** 스포이드: true = 현재 레이어에서 */
     var pickFromLayer = false
+    /** 벡터 지우개 교점까지 */
+    var vectorEraseCut = false
     /** 격자 간격 (px, 0 = 끔) */
     var gridStep = 0
     /** 퀵 액세스: 담아 둔 동작 이름 (Action.name) */
@@ -162,6 +164,7 @@ class AppSettings(context: Context) {
         quickOpen = prefs.getBoolean("quickOpen", false)
         gridStep = prefs.getInt("gridStep", 0).coerceIn(0, 2000)
         pickFromLayer = prefs.getBoolean("pickFromLayer", false)
+        vectorEraseCut = prefs.getBoolean("vectorEraseCut", false)
         quickFx = prefs.getFloat("quickFx", 0f)
         quickFy = prefs.getFloat("quickFy", 1f)
         prefs.getString("autoActions", null)?.let { raw ->
@@ -268,6 +271,7 @@ class AppSettings(context: Context) {
             .putBoolean("quickOpen", quickOpen)
             .putInt("gridStep", gridStep)
             .putBoolean("pickFromLayer", pickFromLayer)
+            .putBoolean("vectorEraseCut", vectorEraseCut)
             .putFloat("quickFx", quickFx)
             .putFloat("quickFy", quickFy)
             .putString("quickActions", quickActions.joinToString(","))

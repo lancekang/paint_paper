@@ -47,6 +47,7 @@
     - 도형 다각형·별 (shapeKind 5·6, shapeSides).
     - 타임랩스 (`processTimelapse` → `onTimelapseFrame` → cacheDir/timelapse/*.jpg → `writeTimelapse` MP4).
     - 필압 자동 조정 (`ui/PressurePad.kt`): 가운데값 → 0.5가 되는 감마.
+    - 벡터 지우개 교점까지 (`document/Vector.kt` VectorCut: 다른 선의 선분을 32px 격자에 넣고 교점을 찾아 닿은 곳 앞뒤 교점 사이를 잘라 조각 0~2개로). `CanvasRenderer.vectorEraseCut`.
     - 색조 보정 레이어 (`LayerProps.adjustKind/adjustValues`, `composeAdjust`): 합성 중 t.cur를 필터에 통과시켜 GL_CONSTANT_ALPHA(불투명도)로 섞음. 흐리기 계열 제외, 마스크 무시, 그리기·병합 막음. 편집은 `MainActivity.showFilter(kind, adjustId, adjustStart)`.
   - **PSD 입출력** (`document/PsdIO.kt`): RGB 8비트, 레이어·폴더(통과)·불투명도·합성 모드·클리핑·표시·투명 잠금(lspf)·한글 이름(luni). 쓰기는 RLE. 읽기는 무압축/RLE/ZIP(예측 포함) 레이어 채널과 레이어 마스크(채널 -2), 효과는 무시. JVM 왕복 테스트와 ag-psd 교차 확인은 통과, 포토샵/클립 스튜디오에서 실제로 열어 보지는 않았습니다.
 

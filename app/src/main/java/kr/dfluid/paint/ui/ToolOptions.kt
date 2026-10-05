@@ -162,6 +162,13 @@ class ToolOptions(private val ctx: Context, private val host: Host) {
         val rest = (3 - list.size % 3) % 3
         repeat(rest) { k -> line?.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f).apply { if (k < rest - 1) rightMargin = Ui.dp(ctx, 4f) }) }
         view.addView(box, lp(2f))
+        if (tool == Tool.ERASER) {
+            val s = host.settings
+            view.addView(toggleRow(listOf("벡터: 선 전체", "벡터: 교점까지"), if (s.vectorEraseCut) 1 else 0) {
+                s.vectorEraseCut = it == 1; s.save()
+                host.onPickModeChanged()
+            }, lp(6f))
+        }
         val actions = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         fun act(label: String, f: () -> Unit) = actions.addView(Ui.button(ctx, label, onClick = f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             rightMargin = Ui.dp(ctx, 4f)

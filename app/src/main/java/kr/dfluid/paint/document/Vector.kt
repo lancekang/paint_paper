@@ -54,6 +54,29 @@ class VStroke(val stamps: FloatArray, val brush: Brush, val color: Int, val fill
         return false
     }
 
+    /** 지우개 스탬프가 닿은 스탬프 번호 (없으면 -1). 채우기 도형은 -1 */
+    fun hitIndex(x: Float, y: Float, r: Float): Int {
+        if (fill != null) return -1
+        if (x + r < bounds[0] || x - r > bounds[2] || y + r < bounds[1] || y - r > bounds[3]) return -1
+        var i = 0
+        var k = 0
+        while (i + 2 < stamps.size) {
+            val dx = stamps[i] - x
+            val dy = stamps[i + 1] - y
+            val reach = r + stamps[i + 2] * 0.5f
+            if (dx * dx + dy * dy <= reach * reach) return k
+            i += StrokeBuilder.FLOATS
+            k++
+        }
+        return -1
+    }
+
+    val count: Int get() = stamps.size / StrokeBuilder.FLOATS
+
+    /** 스탬프 [from]..[to](포함)만 남긴 선 */
+    fun slice(from: Int, to: Int): VStroke =
+        VStroke(stamps.copyOfRange(from * StrokeBuilder.FLOATS, (to + 1) * StrokeBuilder.FLOATS), brush, color)
+
     /** m = [a, b, c, d, tx, ty] : 새 좌표 = (a·x + c·y + tx, b·x + d·y + ty). 굵기는 넓이 배율의 제곱근만큼. */
     fun transformed(m: FloatArray): VStroke {
         val scale = sqrt(kotlin.math.abs(m[0] * m[3] - m[1] * m[2]))
@@ -136,4 +159,78 @@ class VectorCommand(private val layerId: Int, private val before: List<VStroke>,
     override val bytes: Long get() = (before.sumOf { it.stamps.size } + after.sumOf { it.stamps.size }) * 4L
     override fun undo(s: LayerStore) = s.setVector(layerId, before)
     override fun redo(s: LayerStore) = s.setVector(layerId, after)
+}
+
+/** 교점까지 지우기: 선의 [k]번 스탬프 앞뒤로 다른 선과 만나는 가장 가까운 곳 사이만 잘라 냅니다. */
+object VectorCut {
+    private const val CELL = 32f
+    private val F = StrokeBuilder.FLOATS
+
+    /** 결과: 남는 조각들(0~2개)과 잘라 낸 부분의 경계 (l, t, r, b, 반지름 포함) */
+    class Result(val pieces: List<VStroke>, val removed: FloatArray)
+
+    fun cut(v: VStroke, k: Int, others: List<VStroke>): Result {
+        val n = v.count
+        val s = v.stamps
+        val vb = v.bounds
+        // 다른 선의 선분을 격자에 (v의 경계 안만)
+        val grid = HashMap<Long, ArrayList<FloatArray>>()
+        fun key(cx: Int, cy: Int) = (cx.toLong() shl 32) or (cy.toLong() and 0xffffffffL)
+        for (o in others) {
+            if (o === v || o.fill != null) continue
+            val ob = o.bounds
+            if (ob[2] < vb[0] || ob[0] > vb[2] || ob[3] < vb[1] || ob[1] > vb[3]) continue
+            val st = o.stamps
+            var i = 0
+            while (i + F + 1 < st.size) {
+                val x0 = st[i]; val y0 = st[i + 1]; val x1 = st[i + F]; val y1 = st[i + F + 1]
+                i += F
+                if (maxOf(x0, x1) < vb[0] || minOf(x0, x1) > vb[2] || maxOf(y0, y1) < vb[1] || minOf(y0, y1) > vb[3]) continue
+                val seg = floatArrayOf(x0, y0, x1, y1)
+                for (cx in (minOf(x0, x1) / CELL).toInt()..(maxOf(x0, x1) / CELL).toInt())
+                    for (cy in (minOf(y0, y1) / CELL).toInt()..(maxOf(y0, y1) / CELL).toInt())
+                        grid.getOrPut(key(cx, cy)) { ArrayList() }.add(seg)
+            }
+        }
+        // v의 각 선분과 교차하는 곳의 위치 (스탬프 번호 + 비율)
+        var before = -1f
+        var after = Float.MAX_VALUE
+        for (j in 0 until n - 1) {
+            val ax = s[j * F]; val ay = s[j * F + 1]; val bx = s[(j + 1) * F]; val by = s[(j + 1) * F + 1]
+            for (cx in (minOf(ax, bx) / CELL).toInt()..(maxOf(ax, bx) / CELL).toInt())
+                for (cy in (minOf(ay, by) / CELL).toInt()..(maxOf(ay, by) / CELL).toInt()) {
+                    val list = grid[key(cx, cy)] ?: continue
+                    for (seg in list) {
+                        val t = intersect(ax, ay, bx, by, seg) ?: continue
+                        val pos = j + t
+                        if (pos < k && pos > before) before = pos
+                        if (pos > k && pos < after) after = pos
+                    }
+                }
+        }
+        val from = if (before < 0f) 0 else kotlin.math.floor(before).toInt()
+        val to = if (after == Float.MAX_VALUE) n - 1 else kotlin.math.ceil(after).toInt().coerceAtMost(n - 1)
+        val pieces = ArrayList<VStroke>(2)
+        if (before >= 0f && from >= 1) pieces.add(v.slice(0, from))
+        if (after != Float.MAX_VALUE && to <= n - 2) pieces.add(v.slice(to, n - 1))
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        for (i in from..to) {
+            val rad = s[i * F + 2] + 2f
+            l = minOf(l, s[i * F] - rad); t = minOf(t, s[i * F + 1] - rad)
+            r = maxOf(r, s[i * F] + rad); b = maxOf(b, s[i * F + 1] + rad)
+        }
+        return Result(pieces, floatArrayOf(l, t, r, b))
+    }
+
+    /** 선분 a→b 위에서 seg와 만나는 비율 t (0..1), 없으면 null */
+    private fun intersect(ax: Float, ay: Float, bx: Float, by: Float, seg: FloatArray): Float? {
+        val rx = bx - ax; val ry = by - ay
+        val sx = seg[2] - seg[0]; val sy = seg[3] - seg[1]
+        val den = rx * sy - ry * sx
+        if (kotlin.math.abs(den) < 1e-6f) return null
+        val qx = seg[0] - ax; val qy = seg[1] - ay
+        val t = (qx * sy - qy * sx) / den
+        val u = (qx * ry - qy * rx) / den
+        return if (t in 0f..1f && u in 0f..1f) t else null
+    }
 }

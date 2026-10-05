@@ -210,6 +210,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
         renderer.setBackdrop(Ui.CANVAS_BG)
         renderer.tipProvider = { id -> library.tip(id) }
         renderer.pickFromLayer = settings.pickFromLayer
+        renderer.vectorEraseCut = settings.vectorEraseCut
         renderer.defaultBackground = settings.newCanvasBackground
         canvasView = CanvasView(this, renderer)
         canvasView.host = this
@@ -1513,6 +1514,7 @@ class MainActivity : Activity(), CanvasRenderer.Listener, CanvasView.Host, Short
 
     override fun onPickModeChanged() {
         renderer.pickFromLayer = settings.pickFromLayer
+        renderer.vectorEraseCut = settings.vectorEraseCut
     }
 
     override fun importBrushFile() {
